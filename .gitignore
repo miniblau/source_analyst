@@ -1,0 +1,8 @@
+var/
+corpus/*
+!corpus/golden/
+!corpus/fixtures/
+!corpus/fixtures.json
+__pycache__/
+*.egg-info/
+.venv/
