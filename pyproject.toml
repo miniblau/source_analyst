@@ -11,6 +11,7 @@ dependencies = []
 
 [project.scripts]
 cpg = "source_analyst.cpg.cli:main"
+struct_grep = "source_analyst.struct_grep.cli:main"
 
 [tool.setuptools.packages.find]
 include = ["source_analyst*"]

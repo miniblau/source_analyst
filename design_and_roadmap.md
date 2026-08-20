@@ -14,17 +14,27 @@ read → understand → hypothesize → branch → prove. LLM agents orchestrate
 deterministic substrate (Joern-centric) supplies ground truth; an append-only memory
 accretes facts, hypotheses, trust decisions, and findings.
 
-**Status.** Design frozen (§10). No code written yet. Next action = Phase 0 substrate.
+**Status.** Design frozen (§10). Phase 0 in progress. `cpg` (Joern) and `struct_grep`
+(opengrep) both emit facts; SQLi is validated on WebGoat from both substrates and their
+sink inventories agree exactly. Next action = `belief` CLI.
+
+**Substrate posture — decided 2026-08-20.** Two substrates, kept wired, with different
+jobs. `struct_grep` leads: no build step, every language on day one, sub-3s on WebGoat.
+`cpg` is what answers reachability, and nothing else can — opengrep has no call graph and
+no inter-procedural dataflow, so §4.1 branching and the §7 `trace` loop stay Joern-bound.
+Leading with patterns is a sequencing decision, not a replacement.
 
 **Operating contract.** `CLAUDE.md` governs *how* code gets written here (invariants,
 Joern playbook, testing, architecture). Read it before writing anything. This doc is
 *what* we're building; `CLAUDE.md` is *how*.
 
 **Build order for the code session:**
-1. `cpg` wrapper — Joern server lifecycle (build → cache → warm-query), plus one named
-   query `sql_sinks.sc`, validated against WebGoat ground truth.
-2. `belief` CLI — append to `log.jsonl` + latest-wins projection.
-3. `manifest` + `detect` — class×language join (§10.1) driven by language detection (§10.2).
+1. ~~`cpg` wrapper — Joern server lifecycle (build → cache → warm-query), plus one named
+   query `sql_sinks.sc`, validated against WebGoat ground truth.~~ **done**
+2. ~~`struct_grep` wrapper — opengrep, plus `rules/java/sqli.yaml`, validated against the
+   same WebGoat ground truth.~~ **done**
+3. `belief` CLI — append to `log.jsonl` + latest-wins projection.
+4. `manifest` + `detect` — class×language join (§10.1) driven by language detection (§10.2).
 
 Then Phase 1 wires SQLi end-to-end (§8). Everything in §10 is locked — change it
 deliberately, per `CLAUDE.md`.
@@ -45,11 +55,16 @@ repo/
     classes/               # language-agnostic vuln concepts (§10.1)
     patterns/<lang>/        # per-language sink/source/sanitizer patterns
   queries/                 # named Joern .sc scripts (§10.3) — fixed vocabulary
-  tools/                   # single-purpose CLIs: cpg, belief, manifest, detect, …
+  rules/<lang>/            # named opengrep rule sets (§10.3) — fixed vocabulary
+  source_analyst/          # single-purpose CLIs: cpg, struct_grep, belief, manifest, …
   agents/                  # OpenCode subagent defs: orchestrator, hypothesize, trace, …
   corpus/                  # fixtures (WebGoat, Juice Shop, DVIA) + golden outputs
   var/                     # runtime: CPG cache, log.jsonl — XDG-style, gitignored
 ```
+
+**Substrate prerequisites.** `joern` (4.0.604 validated) and `opengrep` (1.27.1
+validated, `OPENGREP_BIN` to override) on PATH. Each substrate's test suite skips
+cleanly when its binary is absent, so neither is required to work on the other.
 
 **Implementation language — decided 2026-08-14: Python + uv.** Follows `cve_hunter`'s
 shape (uv + Python + XDG + subprocess orchestration + manual LLM gating). Applies to
@@ -101,14 +116,23 @@ everything under `tools/`; agents may differ later. Doesn't touch the design.
 | Tool            | Role                                              | Source        |
 |-----------------|---------------------------------------------------|---------------|
 | `cpg`           | Joern CPG: AST+CFG+data-flow+call-graph, reachability | wrap Joern |
-| `struct_grep`   | structural sink/pattern search where Joern is blind (templates, HTML/CSS, config, Swift) | wrap ast-grep/opengrep |
+| `struct_grep`   | breadth-first structural sink/pattern search — every language, no build step; also covers what Joern is blind to (templates, HTML/CSS, config, Swift) | wrap opengrep |
 | `lsp`           | precise xref / go-to-def / implementors           | per-language LSP |
 | `entrypoints`   | enumerate routes, consumers, deserialization, IPC/CLI, per-framework | first-party |
 | `git_risk`      | churn / recency / authorship risk scoring         | **first-party** |
 | `sbom`          | dependency sinks                                  | wrap syft/etc |
 | `gjorda`        | iOS/Swift where Joern doesn't reach               | MCP           |
 
-**Joern gap policy:** Joern is the spine (covers JVM/Android + most API backends).
+**Division of labour (measured, not assumed).** On WebGoat both substrates find the
+*same 39 SQL sinks* at the same 39 `file:line` pairs — pattern search loses nothing on
+sink inventory, at 2.6s and no CPG. They diverge on the *verdict*: opengrep's constant
+propagation folds `String q = "SELECT …"; execute(q)` and `"a" + " ?"` down to literals,
+cutting 24 candidates to 18 with no true positive lost. So `struct_grep` is the better
+front door, and `cpg` earns its keep on the one thing patterns cannot do at all —
+reachability. Neither is a substitute for the other.
+
+**Joern gap policy:** Joern is the reachability spine (covers JVM/Android + most API
+backends).
 Where it's blind, `struct_grep` gives structural sink-finding (no data-flow), and
 the **trace** agent stitches across the blind edge using the CPG on one side and
 grep on the other (e.g. controller taints var → passed to template → grep confirms
@@ -243,6 +267,9 @@ reproducibility and audit.
 
 Every finding carries its tier. Static-only is honest about being a hypothesis.
 
+0. **static_pattern** — a sink exists at a location, and that is the entire claim.
+   Pattern search has no call graph, so *nothing* about reachability may be asserted
+   from it → *lead, not yet a hypothesis*. Most `struct_grep` output starts here.
 1. **static_reachability** — clean CPG path, no known sanitizer → *hypothesis*.
 2. **static_trace** — LLM+xref confirms path under dynamic dispatch/reflection the
    raw CPG missed → *strong hypothesis*. **v1 ceiling.**
@@ -292,8 +319,9 @@ report       per needs_proof: recreation flow + why + code refs + tier
 ## 8. Roadmap
 
 **Phase 0 — Substrate foundations (no LLM).**
-`cpg` wrapper (build+cache+named queries), `belief` CLI (append + projection),
-`manifest` loader/validator. Everything JSONL. Prove the queries by hand.
+`struct_grep` wrapper (opengrep + named rule sets), `cpg` wrapper (build+cache+named
+queries), `belief` CLI (append + projection), `manifest` loader/validator. Everything
+JSONL. Prove every query and rule against the corpus by hand.
 
 **Phase 1 — One class, end-to-end, flat, static.**
 SSRF manifest. orchestrator + hypothesize + report. No branching yet. Manual LLM
@@ -304,8 +332,9 @@ gating. Output: findings with recreation flows. *This is the first useful delive
 trust decisions. This is where it starts feeling like you.
 
 **Phase 3 — Breadth.**
-More manifests. `struct_grep` fallback for Joern-blind files. `git_risk` first-party
-tool to prioritize churned/recent code. `gjorda` MCP for iOS.
+More manifests and rule sets (js, swift). Cross-substrate stitching for Joern-blind
+files. `git_risk` first-party tool to prioritize churned/recent code. `gjorda` MCP
+for iOS.
 
 **Phase 4 — Dynamic (deferred).**
 Verification tier 3 against a defined target: harness generation, PoC execution,
@@ -391,6 +420,31 @@ queries/
   frontend-specific `methodFullName` regex; tighten per-language only where the corpus
   proves it noisy. (Java resolves cleanly; JS/Swift are partial — validate empirically.)
 - Writing these against the corpus **is** the "get familiar with Joern" task.
+
+#### Rule catalog (`struct_grep`)
+
+The opengrep half of the fixed vocabulary. Named YAML rule sets at
+`rules/<lang>/<class>.yaml`, selected by name — agents never hand the tool rule text,
+exactly as they never hand `cpg` raw Joern.
+
+```
+rules/
+  java/sqli.yaml        # java_sql_sink (inventory) + java_sql_sink_dynamic (candidates)
+```
+
+- **The rule *is* the pattern file.** All vuln knowledge lives here; `struct_grep`
+  contains none (invariant #3). Rule `metadata.kind` / `metadata.vuln_class` are
+  promoted onto the fact, the rest rides along in `rule_meta` unread.
+- **Deliberately two rules per class:** a full inventory, and the subset that survives
+  a constant-folding filter. The inventory is what makes an empty candidate set legible
+  — you can see the sinks were found and then excluded, rather than never seen.
+- **Bind the first argument at any arity** (`$R.m($SQL, ...)`, not `$R.m($SQL)`). The
+  arity-1 form silently drops overloads like
+  `prepareStatement(sql, TYPE_SCROLL_INSENSITIVE, CONCUR_READ_ONLY)` — a real WebGoat
+  SQLi. The corpus caught this; a rule review would not have.
+- Kept separate from `manifests/patterns/` for now: opengrep validates rule files
+  strictly, so a dual-consumer file (Joern sink lists + opengrep rules in one YAML) is
+  a decision for when the manifest loader is real (§10.1), not before.
 
 ### 10.4 JSONL contract
 

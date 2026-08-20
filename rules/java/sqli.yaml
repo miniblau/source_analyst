@@ -1,0 +1,64 @@
+# SQLi sink patterns for Java (design §10.1 — vuln knowledge is data, never code).
+#
+# `struct_grep` runs this file and knows nothing about SQL. Two rules, deliberately:
+#
+#   java_sql_sink          every sink call site — the inventory, for parity with
+#                          the CPG's sql_sinks query and for "did we see it at all"
+#   java_sql_sink_dynamic  the subset whose SQL argument is not a plain literal —
+#                          the actual hypothesis candidate
+#
+# Two-sided by construction: a parameterized control passes a string literal, so
+# `pattern-not` keeps it out of the dynamic rule while leaving it in the inventory.
+#
+# NOTE: pattern search proves no reachability. A hit here is a sink that exists,
+# not a sink an attacker reaches — tier that honestly (§6).
+
+rules:
+  - id: java_sql_sink
+    languages: [java]
+    severity: INFO
+    message: >-
+      SQL sink call site.
+    metadata:
+      vuln_class: sqli
+      kind: sink_candidate
+      dynamic_arg: false
+    patterns:
+      - pattern-either:
+          - pattern: $R.executeQuery(...)
+          - pattern: $R.executeUpdate(...)
+          - pattern: $R.execute(...)
+          - pattern: $R.addBatch(...)
+          - pattern: $R.prepareStatement(...)
+          - pattern: $R.createQuery(...)
+          - pattern: $R.createNativeQuery(...)
+
+  - id: java_sql_sink_dynamic
+    languages: [java]
+    severity: WARNING
+    message: >-
+      SQL sink receives a runtime-built argument; the statement text is not a
+      compile-time literal.
+    metadata:
+      vuln_class: sqli
+      kind: sink_candidate
+      dynamic_arg: true
+    patterns:
+      # `$SQL, ...` matches the FIRST argument at any arity. Binding bare $SQL
+      # would silently drop the 3-arg overloads —
+      # prepareStatement(sql, TYPE_SCROLL_INSENSITIVE, CONCUR_READ_ONLY) is a
+      # real WebGoat SQLi that an arity-1 pattern loses.
+      - pattern-either:
+          - pattern: $R.executeQuery($SQL, ...)
+          - pattern: $R.executeUpdate($SQL, ...)
+          - pattern: $R.execute($SQL, ...)
+          - pattern: $R.addBatch($SQL, ...)
+          - pattern: $R.prepareStatement($SQL, ...)
+          - pattern: $R.createQuery($SQL, ...)
+          - pattern: $R.createNativeQuery($SQL, ...)
+      # Constant-folds: excludes both a plain literal and "a" + "b", and (via
+      # opengrep's svalue propagation) a local assigned a literal.
+      - pattern-not: $R.$METHOD("...", ...)
+      # `super.execute(...)` is a framework call, never a SQL sink. Domain
+      # knowledge, and it lives here in the rule rather than in tool code.
+      - pattern-not: super.$METHOD(...)
