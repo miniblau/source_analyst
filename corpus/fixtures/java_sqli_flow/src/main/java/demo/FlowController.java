@@ -49,6 +49,19 @@ public class FlowController {
     return st.executeQuery("SELECT * FROM " + table + " WHERE active = 1");
   }
 
+  /**
+   * POSITIVE, with a candidate sanitizer on the path. Still a flow: `reachable` must report it,
+   * and `sanitizer_on_path` must report the escape() call sitting on it — without either query
+   * deciding whether that call actually works. Effectiveness is a belief, not a query result.
+   */
+  public ResultSet escaped(@RequestParam String term) throws Exception {
+    return runQuery("SELECT * FROM users WHERE note = '" + escape(term) + "'");
+  }
+
+  private String escape(String s) {
+    return s.replace("'", "''");
+  }
+
   /** NEGATIVE (source with no sink): an annotated source that reaches no SQL sink at all. */
   public String echo(@RequestParam String greeting) {
     return "hello " + greeting;

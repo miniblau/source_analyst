@@ -39,7 +39,7 @@
   "java_sqli_flow": {
     "path": "corpus/fixtures/java_sqli_flow",
     "lang": "JAVASRC",
-    "note": "in-repo two-sided control for dataflow: one tainted path to statement text; a bound-parameter, a constant-only, and a sink-less source as negatives. Both sides use the same sink names, so only dataflow separates them.",
+    "note": "in-repo two-sided control for dataflow: two tainted paths to statement text (one raw, one through a candidate sanitizer); a bound-parameter, a constant-only, and a sink-less source as negatives. Both sides use the same sink names, so only dataflow separates them.",
     "queries": {
       "request_sources": {
         "params": {
@@ -79,6 +79,41 @@
             "execute",
             "addBatch",
             "prepareStatement"
+          ]
+        }
+      },
+      "sanitizer_on_path": {
+        "params": {
+          "annotations": [
+            "RequestParam",
+            "PathVariable",
+            "RequestBody",
+            "RequestHeader",
+            "CookieValue"
+          ],
+          "calls": [
+            "getParameter",
+            "getHeader",
+            "getQueryString",
+            "getCookies"
+          ],
+          "sinks": [
+            "executeQuery",
+            "executeUpdate",
+            "execute",
+            "addBatch",
+            "prepareStatement"
+          ],
+          "sanitizers": [
+            "replace",
+            "replaceAll",
+            "escape.*",
+            "encode.*",
+            "sanitize.*",
+            "setString",
+            "setInt",
+            "matches",
+            "quote"
           ]
         }
       }
@@ -145,6 +180,41 @@
             "execute",
             "addBatch",
             "prepareStatement"
+          ]
+        }
+      },
+      "sanitizer_on_path": {
+        "params": {
+          "annotations": [
+            "RequestParam",
+            "PathVariable",
+            "RequestBody",
+            "RequestHeader",
+            "CookieValue"
+          ],
+          "calls": [
+            "getParameter",
+            "getHeader",
+            "getQueryString",
+            "getCookies"
+          ],
+          "sinks": [
+            "executeQuery",
+            "executeUpdate",
+            "execute",
+            "addBatch",
+            "prepareStatement"
+          ],
+          "sanitizers": [
+            "replace",
+            "replaceAll",
+            "escape.*",
+            "encode.*",
+            "sanitize.*",
+            "setString",
+            "setInt",
+            "matches",
+            "quote"
           ]
         }
       }
