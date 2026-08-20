@@ -3,10 +3,84 @@
     "path": "corpus/fixtures/java_sqli_min",
     "lang": "JAVASRC",
     "note": "in-repo two-sided control: one concatenated sink, one parameterized, one no-SQL method",
-    "rules": ["java/sqli"],
+    "rules": [
+      "java/sqli"
+    ],
     "queries": {
       "sql_sinks": {
-        "params": {"sinks": ["executeQuery", "executeUpdate", "execute", "prepareStatement"]}
+        "params": {
+          "sinks": [
+            "executeQuery",
+            "executeUpdate",
+            "execute",
+            "prepareStatement"
+          ]
+        }
+      },
+      "request_sources": {
+        "params": {
+          "annotations": [
+            "RequestParam",
+            "PathVariable",
+            "RequestBody",
+            "RequestHeader",
+            "CookieValue"
+          ],
+          "calls": [
+            "getParameter",
+            "getHeader",
+            "getQueryString",
+            "getCookies"
+          ]
+        }
+      }
+    }
+  },
+  "java_sqli_flow": {
+    "path": "corpus/fixtures/java_sqli_flow",
+    "lang": "JAVASRC",
+    "note": "in-repo two-sided control for dataflow: one tainted path to statement text; a bound-parameter, a constant-only, and a sink-less source as negatives. Both sides use the same sink names, so only dataflow separates them.",
+    "queries": {
+      "request_sources": {
+        "params": {
+          "annotations": [
+            "RequestParam",
+            "PathVariable",
+            "RequestBody",
+            "RequestHeader",
+            "CookieValue"
+          ],
+          "calls": [
+            "getParameter",
+            "getHeader",
+            "getQueryString",
+            "getCookies"
+          ]
+        }
+      },
+      "reachable": {
+        "params": {
+          "annotations": [
+            "RequestParam",
+            "PathVariable",
+            "RequestBody",
+            "RequestHeader",
+            "CookieValue"
+          ],
+          "calls": [
+            "getParameter",
+            "getHeader",
+            "getQueryString",
+            "getCookies"
+          ],
+          "sinks": [
+            "executeQuery",
+            "executeUpdate",
+            "execute",
+            "addBatch",
+            "prepareStatement"
+          ]
+        }
       }
     }
   },
@@ -16,12 +90,62 @@
     "repo": "https://github.com/WebGoat/WebGoat.git",
     "commit": "7517acca95d9851da706452454c223dd13545ef4",
     "note": "clone at this commit; golden output is commit-specific",
-    "rules": ["java/sqli"],
+    "rules": [
+      "java/sqli"
+    ],
     "queries": {
       "sql_sinks": {
         "params": {
-          "sinks": ["executeQuery", "executeUpdate", "execute", "addBatch",
-                    "prepareStatement", "createQuery", "createNativeQuery"]
+          "sinks": [
+            "executeQuery",
+            "executeUpdate",
+            "execute",
+            "addBatch",
+            "prepareStatement",
+            "createQuery",
+            "createNativeQuery"
+          ]
+        }
+      },
+      "request_sources": {
+        "params": {
+          "annotations": [
+            "RequestParam",
+            "PathVariable",
+            "RequestBody",
+            "RequestHeader",
+            "CookieValue"
+          ],
+          "calls": [
+            "getParameter",
+            "getHeader",
+            "getQueryString",
+            "getCookies"
+          ]
+        }
+      },
+      "reachable": {
+        "params": {
+          "annotations": [
+            "RequestParam",
+            "PathVariable",
+            "RequestBody",
+            "RequestHeader",
+            "CookieValue"
+          ],
+          "calls": [
+            "getParameter",
+            "getHeader",
+            "getQueryString",
+            "getCookies"
+          ],
+          "sinks": [
+            "executeQuery",
+            "executeUpdate",
+            "execute",
+            "addBatch",
+            "prepareStatement"
+          ]
         }
       }
     }

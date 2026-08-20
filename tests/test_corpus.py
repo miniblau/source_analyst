@@ -104,6 +104,81 @@ class TestGolden(unittest.TestCase):
             self.assertLessEqual(f["line"], len(path.read_text().splitlines()),
                                  f"{f['file']}:{f['line']} is past end of file")
 
+    # ------------------------------------------------------------ request_sources
+
+    def test_request_sources_webgoat(self):
+        facts, meta = self._check("webgoat", "request_sources")
+        qm = meta["query_meta"]
+        self.assertGreater(qm["matched_annotation"], 100)
+        self.assertIn("RequestParam", qm["annotation_names_present"])
+        # An annotated controller parameter is an entry point: the framework
+        # calls it, so zero CPG callers is expected and must not be read as dead.
+        annotated = [f for f in facts if f["origin"] == "annotation"]
+        self.assertTrue(any(f["callers"] == 0 for f in annotated))
+
+    def test_request_sources_absent_is_not_a_frontend_gap(self):
+        """No annotated sources must be distinguishable from annotations unparsed."""
+        facts, meta = self._check("java_sqli_min", "request_sources")
+        qm = meta["query_meta"]
+        self.assertEqual(facts, [])
+        self.assertEqual(qm["matched_annotation"], 0)
+        # The claim "this tree has no request sources" is only honest because the
+        # CPG parsed parameters at all and simply found none annotated.
+        self.assertGreater(qm["cpg_parameters"], 0)
+        self.assertEqual(qm["cpg_annotated_params"], 0)
+
+    # ------------------------------------------------------------------ reachable
+
+    def test_reachable_two_sided_fixture(self):
+        """The discriminating test: identical sink names on both sides."""
+        facts, meta = self._check("java_sqli_flow", "reachable")
+        qm = meta["query_meta"]
+        self.assertTrue(qm["dataflow_overlay"], "no dataflow overlay — emptiness would be a lie")
+
+        # positive: exactly one flow, and it is the concatenated one
+        self.assertEqual(len(facts), 1, [f["sink_code"] for f in facts])
+        flow = facts[0]
+        self.assertEqual(flow["kind"], "flow")
+        self.assertEqual(flow["source_name"], "name")
+        self.assertEqual(flow["source_marker"], "RequestParam")
+        self.assertEqual(flow["sink_name"], "executeQuery")
+        self.assertGreater(flow["crosses_methods"], 1, "should cross a method boundary")
+        self.assertTrue(flow["steps"])
+
+        # negatives: both sides really were in scope — the sinks and sources of
+        # the bound/constant/sink-less cases exist, they simply do not connect.
+        self.assertGreater(qm["source_nodes"], 1)
+        self.assertGreater(qm["sink_arg_nodes"], 1)
+        self.assertEqual(qm["pairs"], 1)
+
+        # the bound-parameter control must not appear at any tier
+        self.assertNotIn("bound", flow["subject"])
+
+    def test_reachable_webgoat_known_lessons(self):
+        facts, meta = self._check("webgoat", "reachable")
+        by_file = {f["sink_file"].split("/")[-1] for f in facts}
+        for known in ["SqlInjectionLesson5a.java", "SqlInjectionLesson8.java",
+                      "SqlInjectionChallenge.java", "Servers.java"]:
+            self.assertIn(known, by_file, f"known WebGoat SQLi flow missing: {known}")
+        # inter-procedural reach is the whole point; a single-hop-only result
+        # means the call graph is not being traversed.
+        self.assertTrue(any(f["crosses_methods"] >= 3 for f in facts))
+        self.assertTrue(meta["query_meta"]["dataflow_overlay"])
+
+    def test_reachable_is_narrower_than_sink_inventory(self):
+        """Reachability must actually prune, or it is adding no evidence."""
+        fx = FIXTURES["webgoat"]
+        src = ROOT / fx["path"]
+        if not src.is_dir():
+            self.skipTest("webgoat fixture not present")
+        sinks, _ = run_query(src, "sql_sinks", fx["queries"]["sql_sinks"]["params"], fx["lang"])
+        flows, _ = run_query(src, "reachable", fx["queries"]["reachable"]["params"], fx["lang"])
+        reached = {(f["sink_file"], f["sink_line"]) for f in flows}
+        inventory = {(f["file"], f["line"]) for f in sinks}
+        self.assertLess(len(reached), len(inventory))
+        self.assertTrue(reached <= inventory,
+                        f"reachable reported sites absent from the inventory: {reached - inventory}")
+
     def test_empty_result_is_disambiguated(self):
         """No match must be distinguishable from a CPG that built nothing."""
         fx = FIXTURES["java_sqli_min"]
