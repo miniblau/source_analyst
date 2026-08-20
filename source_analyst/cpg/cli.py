@@ -5,6 +5,7 @@
     cpg status --src PATH [--meta]
     cpg stop   --src PATH | --all
     cpg query  --src PATH --query NAME [--param k=v] [--param-json k=JSON]
+                                       [--params-from FILE|-]
     cpg queries [--meta]
 
 stdout carries bare JSONL fact records (§10.4) and nothing else; every human /
@@ -33,6 +34,22 @@ def _emit_meta(obj: dict, to_stdout: bool) -> None:
 
 def _params(args: argparse.Namespace) -> dict:
     out: dict = {}
+    # A params object on stdin is how the manifest feeds a query (§10.1), so a
+    # sink list is data from a reviewed file rather than shell history:
+    #   manifest params --class sqli --lang java --query reachable \
+    #     | cpg query --src PATH --query reachable --params-from -
+    # Explicit --param flags are applied afterwards and win, so a one-off
+    # override stays possible without editing the manifest.
+    src = getattr(args, "params_from", None)
+    if src:
+        text = sys.stdin.read() if src == "-" else Path(src).read_text()
+        try:
+            loaded = json.loads(text)
+        except ValueError as e:
+            raise SystemExit(f"cpg: --params-from {src}: invalid JSON ({e})")
+        if not isinstance(loaded, dict):
+            raise SystemExit(f"cpg: --params-from {src}: expected a JSON object")
+        out.update(loaded)
     for item in args.param or []:
         k, sep, v = item.partition("=")
         if not sep:
@@ -107,6 +124,9 @@ def cmd_queries(args: argparse.Namespace) -> int:
 def cmd_query(args: argparse.Namespace) -> int:
     ws = Workspace.of(args.src)
     queries.resolve(args.query)  # fail fast on an unknown name, before any JVM work
+    # Resolved exactly once: --params-from consumes stdin, so a second call
+    # would read an empty stream and fail after the facts were already emitted.
+    params = _params(args)
     if not ws.is_built():
         if args.no_build:
             raise SystemExit(f"cpg: no CPG for {ws.src} and --no-build given")
@@ -115,7 +135,7 @@ def cmd_query(args: argparse.Namespace) -> int:
     ws.query_dir.mkdir(parents=True, exist_ok=True)
     out_file = ws.query_dir / f"{args.query}.{os.getpid()}.{time.monotonic_ns()}.json"
     out_file.unlink(missing_ok=True)
-    code = queries.source(args.query, out_file, _params(args))
+    code = queries.source(args.query, out_file, params)
 
     started = time.time()
     repl = server.run_scala(ws, code, timeout=args.timeout)
@@ -136,7 +156,7 @@ def cmd_query(args: argparse.Namespace) -> int:
     n = records.write_jsonl((records.fact(r, src) for r in rows), sys.stdout)
     _emit_meta(
         {"cmd": "query", "query": args.query, "src": src, "facts": n,
-         "seconds": elapsed, "params": _params(args), "query_meta": meta,
+         "seconds": elapsed, "params": params, "query_meta": meta,
          "source_hash": ws.source_hash},
         to_stdout=False,
     )
@@ -205,6 +225,9 @@ def main(argv: list[str] | None = None) -> int:
     q.add_argument("--query", required=True, help="named query from queries/ (fixed vocabulary)")
     q.add_argument("--param", action="append", metavar="k=v", help="string parameter")
     q.add_argument("--param-json", action="append", metavar="k=JSON", help="structured parameter")
+    q.add_argument("--params-from", metavar="FILE|-",
+                   help="read a JSON params object from a file or stdin "
+                        "(`manifest params ... | cpg query --params-from -`)")
     q.add_argument("--timeout", type=int, default=server.QUERY_TIMEOUT)
     q.add_argument("--no-build", action="store_true", help="fail instead of building on a miss")
     q.set_defaults(fn=cmd_query)

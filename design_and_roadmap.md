@@ -16,7 +16,16 @@ accretes facts, hypotheses, trust decisions, and findings.
 
 **Status.** Design frozen (§10). Phase 0 in progress. `cpg` (Joern) and `struct_grep`
 (opengrep) both emit facts; SQLi is validated on WebGoat from both substrates and their
-sink inventories agree exactly. Next action = `belief` CLI.
+sink inventories agree exactly. The dataflow spine is in: `request_sources` → `reachable`
+→ `sanitizer_on_path` narrow 39 WebGoat sink candidates to 16 sites with a proven flow,
+inter-procedural to 4 method hops. `manifest` + `detect` drive all four queries from
+`manifests/patterns/java/sqli.yaml`, so no sink list is typed by hand. Next action =
+`belief` CLI — the last Phase 0 substrate piece.
+
+**Known limit, load-bearing.** `reachableByFlows` enumerates *representative* paths, not
+all routes (proven on WebGoat Lesson8: the clean 61→62 route is never returned). No tool
+may therefore claim a flow is sanitized, and none does — `sanitizer_on_path` reports
+candidates and scopes every count to `reported_*`.
 
 **Substrate posture — decided 2026-08-20.** Two substrates, kept wired, with different
 jobs. `struct_grep` leads: no build step, every language on day one, sub-3s on WebGoat.
@@ -33,8 +42,11 @@ Joern playbook, testing, architecture). Read it before writing anything. This do
    query `sql_sinks.sc`, validated against WebGoat ground truth.~~ **done**
 2. ~~`struct_grep` wrapper — opengrep, plus `rules/java/sqli.yaml`, validated against the
    same WebGoat ground truth.~~ **done**
-3. `belief` CLI — append to `log.jsonl` + latest-wins projection.
-4. `manifest` + `detect` — class×language join (§10.1) driven by language detection (§10.2).
+3. ~~Dataflow spine — `request_sources.sc`, `reachable.sc`, `sanitizer_on_path.sc`, with a
+   two-sided flow fixture (`corpus/fixtures/java_sqli_flow`).~~ **done**
+4. ~~`manifest` + `detect` — class×language join (§10.1) driven by language detection
+   (§10.2). `manifest params … | cpg query --params-from -` is the composition seam.~~ **done**
+5. `belief` CLI — append to `log.jsonl` + latest-wins projection.
 
 Then Phase 1 wires SQLi end-to-end (§8). Everything in §10 is locked — change it
 deliberately, per `CLAUDE.md`.

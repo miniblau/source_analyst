@@ -1,0 +1,46 @@
+# SQL injection — the language-agnostic concept (design §10.1, §10.7).
+#
+# This file holds NO patterns. A pattern is a frontend-specific realization and
+# lives in manifests/patterns/<lang>/sqli.yaml. Adding a language to this class
+# is one new pattern file and zero edits here.
+#
+# `narrative` and `seed_hypotheses` are the seam into the reasoning layer: they
+# drive what the model considers, never what the substrate matches.
+
+class: sqli
+title: SQL injection
+applies_to: [java, js, swift, c]
+
+narrative: >-
+  A value the caller controls reaches a database engine as statement *text*
+  rather than as a bound parameter, so the attacker's input is parsed as SQL
+  instead of consumed as data. The bug is the concatenation, not the query: a
+  parameterized statement carrying the same untrusted value is not vulnerable.
+  Consequence ranges from reading adjacent rows to full data disclosure,
+  authentication bypass, or write access, depending on the statement and the
+  database account's privileges.
+
+# What a reviewer should go looking for once a candidate appears. These are
+# prompts for investigation, never assertions — each is a hypothesis until a
+# substrate query supports it with a src.
+seed_hypotheses:
+  - The tainted value lands in an identifier position (table, column, ORDER BY)
+    where bound parameters are not usable, so the developer had no safe primitive
+    and may have reached for concatenation deliberately.
+  - A sanitizer sits on the path but is character-escaping rather than
+    parameterization, so it fails on numeric context or on a second-order path.
+  - The value is stored first and read back later, making this second-order —
+    the source and sink are in different requests and the flow crosses a table.
+  - The sink is reached only through a framework-dispatched entry point, so the
+    call graph shows no caller and reachability must be argued from the route
+    mapping rather than from CPG edges.
+  - An ORM is in use and the concatenation is in the one raw-query escape hatch,
+    which is easy to miss when the surrounding code looks uniformly safe.
+
+# Verification tiers this class can honestly reach without a running target
+# (§6). Static-only evidence stops at static_reachability — never `confirmed`.
+max_static_tier: static_reachability
+
+references:
+  - https://cwe.mitre.org/data/definitions/89.html
+  - https://owasp.org/www-community/attacks/SQL_Injection
