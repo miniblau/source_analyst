@@ -21,6 +21,7 @@ from source_analyst.manifest.loader import (
     language_map,
     load_class,
     load_patterns,
+    tier_table,
     validate_all,
 )
 
@@ -189,6 +190,93 @@ class TestPatternLoading(unittest.TestCase):
                 cwd=ROOT, env=env, capture_output=True, text=True)
             self.assertEqual(proc.returncode, 1)
             self.assertIn("undefined block", proc.stdout + proc.stderr)
+
+
+class TestTiers(unittest.TestCase):
+    """§6 report honesty. The failure this guards is not a crash: it is a strong
+    lead being presented as an assessed-and-clean result."""
+
+    def _tree(self, root: Path, tier: str, queries: str) -> None:
+        (root / "classes").mkdir(exist_ok=True)
+        (root / "patterns" / "js").mkdir(parents=True, exist_ok=True)
+        (root / "classes" / "xss.yaml").write_text(textwrap.dedent(f"""
+            class: xss
+            title: XSS
+            applies_to: [js]
+            narrative: n
+            max_static_tier: {tier}
+        """))
+        (root / "patterns" / "js" / "xss.yaml").write_text(textwrap.dedent(f"""
+            class: xss
+            language: js
+            sinks:
+              sinks: [dangerouslySetInnerHTML]
+            queries:
+              {queries}
+            max_static_tier: {tier}
+        """))
+
+    def test_tier_table_matches_the_spec(self):
+        tiers = tier_table()
+        self.assertEqual(tiers["static_pattern"]["ordinal"], 0)
+        self.assertFalse(tiers["static_pattern"]["is_hypothesis"])   # lead, not hypothesis
+        self.assertEqual(tiers["static_reachability"]["requires_queries"], ["reachable"])
+
+    def test_cannot_claim_reachability_without_binding_a_reachability_query(self):
+        """A JSX attribute is not a call node, so no current query can reach it.
+        A pattern file for such a sink must not be able to claim it did."""
+        with tempfile.TemporaryDirectory() as d:
+            root = Path(d)
+            self._tree(root, "static_reachability", "sql_sinks: [sinks]")
+            os.environ["SOURCE_ANALYST_MANIFESTS"] = str(root)
+            try:
+                with self.assertRaises(ManifestError) as cm:
+                    load_patterns("xss", "js")
+                self.assertIn("requires quer", str(cm.exception))
+                self.assertIn("reachable", str(cm.exception))
+            finally:
+                del os.environ["SOURCE_ANALYST_MANIFESTS"]
+
+    def test_pattern_only_class_is_honest_and_loads(self):
+        with tempfile.TemporaryDirectory() as d:
+            root = Path(d)
+            self._tree(root, "static_pattern", "sql_sinks: [sinks]")
+            os.environ["SOURCE_ANALYST_MANIFESTS"] = str(root)
+            try:
+                p = load_patterns("xss", "js")
+                self.assertEqual(p.max_static_tier, "static_pattern")
+                # The load-bearing distinction: never assessed, not assessed-clean.
+                self.assertFalse(p.reachability_assessed())
+                problems, gaps = validate_all()
+                self.assertEqual(problems, [])
+                self.assertTrue(any("never assessed" in g for g in gaps))
+            finally:
+                del os.environ["SOURCE_ANALYST_MANIFESTS"]
+
+    def test_language_may_not_out_claim_its_class_ceiling(self):
+        with tempfile.TemporaryDirectory() as d:
+            root = Path(d)
+            self._tree(root, "static_pattern", "sql_sinks: [sinks]")
+            (root / "patterns" / "js" / "xss.yaml").write_text(textwrap.dedent("""
+                class: xss
+                language: js
+                sinks:
+                  sinks: [dangerouslySetInnerHTML]
+                queries:
+                  reachable: [sinks]
+                max_static_tier: static_reachability
+            """))
+            os.environ["SOURCE_ANALYST_MANIFESTS"] = str(root)
+            try:
+                problems, _ = validate_all()
+                self.assertTrue(any("above the class ceiling" in p for p in problems), problems)
+            finally:
+                del os.environ["SOURCE_ANALYST_MANIFESTS"]
+
+    def test_java_sqli_declares_the_tier_it_can_actually_reach(self):
+        p = load_patterns("sqli", "java")
+        self.assertEqual(p.max_static_tier, "static_reachability")
+        self.assertTrue(p.reachability_assessed())
 
 
 class TestSelection(unittest.TestCase):

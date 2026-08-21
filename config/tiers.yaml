@@ -1,0 +1,46 @@
+# Verification tiers (design §6) — report honesty as data.
+#
+# Every finding carries its tier. The point of this file is to make one specific
+# lie impossible: claiming reachability for a sink shape no query can actually
+# reach. `requires_queries` is the guard — a class×language may only declare a
+# tier whose queries it actually binds (see manifests/patterns/<lang>/<class>.yaml).
+#
+# The distinction that matters most is between:
+#   "assessed at static_reachability, no path found"  — we looked, found nothing
+#   "ceiling is static_pattern, never assessed"       — no query can see this sink
+# Collapsing the second into the first downgrades a real lead by implying a
+# clean result. React's dangerouslySetInnerHTML is the standing example: an
+# explicit opt-out of the framework's escaping, so a strong lead, yet a JSX
+# attribute is not a call node and no current query can reach it.
+
+static_pattern:
+  ordinal: 0
+  claim: a sink exists at this location, and that is the entire claim
+  is_hypothesis: false          # a lead — not yet a hypothesis
+  requires_queries: []
+
+static_reachability:
+  ordinal: 1
+  claim: a path from an untrusted source to the sink, with no known sanitizer
+  is_hypothesis: true
+  requires_queries: [reachable]
+
+static_trace:
+  ordinal: 2
+  claim: path confirmed under dynamic dispatch or reflection the raw CPG missed
+  is_hypothesis: true
+  requires_queries: [reachable, callers, implementors]   # v1 ceiling (§6)
+
+dynamic_poc:
+  ordinal: 3
+  claim: payload driven through a running target, sink misbehaviour asserted
+  is_hypothesis: false          # confirmed
+  requires_queries: []
+  deferred: true                # Phase 4
+
+fuzz:
+  ordinal: 4
+  claim: harness-driven discovery against parsers and format handlers
+  is_hypothesis: false
+  requires_queries: []
+  deferred: true

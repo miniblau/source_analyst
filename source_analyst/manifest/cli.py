@@ -108,11 +108,19 @@ def cmd_plan(args: argparse.Namespace) -> int:
             continue
         for lang in realized:
             p = load_patterns(vc.name, lang)
-            plan.append({
+            entry = {
                 "class": vc.name, "language": lang,
                 "queries": sorted(p.queries), "rules": p.rules,
-                "max_static_tier": vc.max_static_tier,
-            })
+                # The per-LANGUAGE ceiling, not the class's ambition.
+                "max_static_tier": p.max_static_tier,
+                "reachability_assessed": p.reachability_assessed(),
+            }
+            if not p.reachability_assessed():
+                # Said out loud, because silence here reads as a clean result.
+                entry["not_assessed"] = (
+                    "no reachability query is bound for this sink shape — hits are "
+                    "leads for manual review, not paths that came back clean")
+            plan.append(entry)
         # The language is present in the tree and the class claims it, but no
         # patterns exist yet. Loud, because it is uncovered ground that would
         # otherwise read as a clean result.

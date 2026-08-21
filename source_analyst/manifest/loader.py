@@ -61,6 +61,18 @@ def _read_yaml(path: Path) -> dict[str, Any]:
     return doc
 
 
+def tier_table() -> dict[str, dict[str, Any]]:
+    """Verification tiers (§6). Data, so a tier's requirements are reviewable."""
+    path = config_dir() / "tiers.yaml"
+    if not path.is_file():
+        raise ManifestError(f"missing tier table: {path}")
+    doc = _read_yaml(path)
+    for name, spec in doc.items():
+        if not isinstance(spec, dict) or "ordinal" not in spec:
+            raise ManifestError(f"{path}: tier {name!r} must be a mapping with an `ordinal`")
+    return doc
+
+
 def language_map() -> dict[str, list[str]]:
     """Extension → language map (§10.2). Static, explicit, boring."""
     path = config_dir() / "languages.yaml"
@@ -97,7 +109,17 @@ class Patterns:
     blocks: dict[str, dict[str, Any]]
     queries: dict[str, list[str]]
     rules: list[str]
+    max_static_tier: str
     path: Path
+
+    def reachability_assessed(self) -> bool:
+        """Whether any bound query can establish a path to this class's sinks.
+
+        False means reachability was never *assessable* here — not that it was
+        assessed and came back clean. A report that conflates the two turns a
+        strong lead into an apparent all-clear.
+        """
+        return "reachable" in self.queries
 
     def params_for(self, query: str) -> dict[str, Any]:
         """Merge the blocks this query takes into a params object.
@@ -155,13 +177,16 @@ def load_class(name: str) -> VulnClass:
     applies_to = doc["applies_to"]
     if not isinstance(applies_to, list) or not applies_to:
         raise ManifestError(f"{path}: applies_to must be a non-empty list of languages")
+    class_tier = str(doc.get("max_static_tier", "static_reachability"))
+    if class_tier not in tier_table():
+        raise ManifestError(f"{path}: max_static_tier {class_tier!r} is not a known tier (§6)")
     return VulnClass(
         name=name,
         title=str(doc["title"]),
         applies_to=[str(x) for x in applies_to],
         narrative=" ".join(str(doc["narrative"]).split()),
         seed_hypotheses=[" ".join(str(h).split()) for h in doc.get("seed_hypotheses", [])],
-        max_static_tier=str(doc.get("max_static_tier", "static_reachability")),
+        max_static_tier=class_tier,
         references=[str(r) for r in doc.get("references", [])],
         path=path,
     )
@@ -185,7 +210,7 @@ def load_patterns(vuln_class: str, language: str) -> Patterns:
             f"{path}: declares {doc['class']}/{doc['language']} but is filed as "
             f"{language}/{vuln_class}")
 
-    reserved = set(PATTERN_REQUIRED) | {"rules"}
+    reserved = set(PATTERN_REQUIRED) | {"rules", "max_static_tier"}
     blocks = {k: v for k, v in doc.items() if k not in reserved}
     for name, block in blocks.items():
         if not isinstance(block, dict):
@@ -204,12 +229,31 @@ def load_patterns(vuln_class: str, language: str) -> Patterns:
                 f"{path}: queries.{query} references undefined block(s): {', '.join(unknown)}")
         bound[str(query)] = [str(n) for n in names]
 
+    tiers = tier_table()
+    tier = str(doc.get("max_static_tier", "static_pattern"))
+    if tier not in tiers:
+        raise ManifestError(
+            f"{path}: max_static_tier {tier!r} is not a known tier; "
+            f"expected one of {', '.join(sorted(tiers))}")
+    # The guard this whole file exists for: a class×language may not claim a
+    # tier whose queries it does not bind. Without it, a pattern file for a sink
+    # shape no query can reach (a JSX attribute, a template, a config key) could
+    # still declare static_reachability, and its findings would read as "we
+    # looked and found no path" when nothing ever looked.
+    needed = [q for q in tiers[tier].get("requires_queries", []) or [] if q not in bound]
+    if needed:
+        raise ManifestError(
+            f"{path}: max_static_tier {tier!r} requires quer(ies) "
+            f"{', '.join(needed)}, which this file does not bind — either bind them "
+            f"or lower the tier")
+
     return Patterns(
         vuln_class=vuln_class,
         language=language,
         blocks=blocks,
         queries=bound,
         rules=[str(r) for r in doc.get("rules", [])],
+        max_static_tier=tier,
         path=path,
     )
 
@@ -253,6 +297,11 @@ def validate_all() -> tuple[list[str], list[str]]:
         language_map()
     except ManifestError as e:
         problems.append(str(e))
+    try:
+        tiers = tier_table()
+    except ManifestError as e:
+        problems.append(str(e))
+        return problems, gaps
 
     # An empty manifests tree previously validated as ok:true, exit 0 — so a
     # missing or mis-pointed SOURCE_ANALYST_MANIFESTS read as a healthy install
@@ -276,10 +325,23 @@ def validate_all() -> tuple[list[str], list[str]]:
                             f"{name}.yaml yet, that language is uncovered")
                 continue
             try:
-                load_patterns(name, lang)
+                p = load_patterns(name, lang)
                 realized += 1
             except ManifestError as e:
                 problems.append(str(e))
+                continue
+            if tiers[p.max_static_tier]["ordinal"] > tiers[vc.max_static_tier]["ordinal"]:
+                problems.append(
+                    f"{p.path}: claims tier {p.max_static_tier!r}, above the class ceiling "
+                    f"{vc.max_static_tier!r} in classes/{name}.yaml")
+            # Not a problem — a real and reportable limit. A class×language that
+            # cannot be assessed for reachability still yields leads; what it
+            # must never do is let those leads read as "assessed, nothing found".
+            if not p.reachability_assessed():
+                gaps.append(
+                    f"patterns/{lang}/{name}.yaml: ceiling {p.max_static_tier!r} — no "
+                    f"reachability query is bound, so findings here are leads that were "
+                    f"never assessed for a path, not paths that came back clean")
         # A class realized in NO language is the dead stub §10.1 exists to
         # prevent: it would load, match nothing, and report a clean bill of
         # health it never earned.

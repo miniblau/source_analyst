@@ -282,6 +282,11 @@ Every finding carries its tier. Static-only is honest about being a hypothesis.
 0. **static_pattern** — a sink exists at a location, and that is the entire claim.
    Pattern search has no call graph, so *nothing* about reachability may be asserted
    from it → *lead, not yet a hypothesis*. Most `struct_grep` output starts here.
+   **A tier-0 ceiling is not a weak finding.** React's `dangerouslySetInnerHTML` is
+   an explicit opt-out of the framework's escaping — a strong lead — yet a JSX
+   attribute is not a call node, so no current query can reach it. Such a class must
+   report "never assessed for a path", never "no path found"; the second downgrades
+   the lead by implying we looked.
 1. **static_reachability** — clean CPG path, no known sanitizer → *hypothesis*.
 2. **static_trace** — LLM+xref confirms path under dynamic dispatch/reflection the
    raw CPG missed → *strong hypothesis*. **v1 ceiling.**
@@ -291,6 +296,12 @@ Every finding carries its tier. Static-only is honest about being a hypothesis.
 
 Mobile/web/API dynamic targets (your 9/10 case) make tier 3 attractive *later*, but
 v1 stops at tier 2 by design.
+
+**The table is data** (`config/tiers.yaml`), and each tier declares the queries it
+requires. A class×language may only claim a tier whose queries it binds, so a pattern
+file for a sink shape no query can reach *cannot* declare `static_reachability` — the
+loader rejects it. `manifest plan` reports the per-language ceiling and, when
+reachability is not assessable, says so before anything runs.
 
 ---
 

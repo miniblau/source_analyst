@@ -97,3 +97,8 @@ queries:
 # a single dual-consumer file is a decision for later, not a refactor for now.
 rules:
   - java/sqli
+
+# Verification ceiling for THIS language (§6). Guarded: the loader rejects a
+# tier whose queries are not bound above, so this cannot claim reachability the
+# substrate cannot deliver.
+max_static_tier: static_reachability
