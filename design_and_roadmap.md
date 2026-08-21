@@ -19,8 +19,10 @@ accretes facts, hypotheses, trust decisions, and findings.
 sink inventories agree exactly. The dataflow spine is in: `request_sources` → `reachable`
 → `sanitizer_on_path` narrow 39 WebGoat sink candidates to 16 sites with a proven flow,
 inter-procedural to 4 method hops. `manifest` + `detect` drive all four queries from
-`manifests/patterns/java/sqli.yaml`, so no sink list is typed by hand. Next action =
-`belief` CLI — the last Phase 0 substrate piece.
+`manifests/patterns/java/sqli.yaml`, so no sink list is typed by hand. `belief` closes
+Phase 0: one append-only `var/log.jsonl`, facts idempotent on content hash, trust
+decisions latest-wins by log position. **Next action = Phase 1** (§8): orchestrator +
+hypothesize + report, SQLi end-to-end.
 
 **Known limit, load-bearing.** `reachableByFlows` enumerates *representative* paths, not
 all routes (proven on WebGoat Lesson8: the clean 61→62 route is never returned). No tool
@@ -46,7 +48,8 @@ Joern playbook, testing, architecture). Read it before writing anything. This do
    two-sided flow fixture (`corpus/fixtures/java_sqli_flow`).~~ **done**
 4. ~~`manifest` + `detect` — class×language join (§10.1) driven by language detection
    (§10.2). `manifest params … | cpg query --params-from -` is the composition seam.~~ **done**
-5. `belief` CLI — append to `log.jsonl` + latest-wins projection.
+5. ~~`belief` CLI — append to `log.jsonl` + latest-wins projection, verdict vocabulary
+   in `config/verdicts.yaml`.~~ **done — Phase 0 complete**
 
 Then Phase 1 wires SQLi end-to-end (§8). Everything in §10 is locked — change it
 deliberately, per `CLAUDE.md`.
@@ -62,6 +65,8 @@ repo/
   design_and_roadmap.md    # this file (the design)
   config/
     languages.yaml         # extension → language map (§10.2)
+    tiers.yaml             # verification tiers + the queries each requires (§6)
+    verdicts.yaml          # belief verdict vocabulary (§5)
     depth.yaml             # branching budget + gates (§4.2)
   manifests/
     classes/               # language-agnostic vuln concepts (§10.1)
