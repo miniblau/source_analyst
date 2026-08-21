@@ -402,6 +402,15 @@ orchestrator  (primary — "understands me")
 `orchestrator` is the assistant you talk to. Only `trace` iterates. All of them
 reach the substrate through the same JSONL tool contract (MCP or shell wrappers).
 
+**Model-agnostic by construction — decided 2026-08-21.** No provider, model name,
+API key or SDK appears anywhere in `source_analyst/`; an agent is a markdown prompt
+plus JSONL in and JSONL out. So each agent can be pointed at whatever model suits it
+— a local model at the desk, a hosted one for the harder judgement — and swapping
+one changes no code. `brief` fixes what an agent may see and `admit` fixes what it
+may assert, which is what makes a weaker or unfamiliar model *safe* to use here: a
+hallucinated fact reference is rejected at the door rather than trusted. Intended
+runner is OpenCode; nothing in the design depends on it.
+
 ### Decomposition of "are there any SSRF here?"
 
 ```
