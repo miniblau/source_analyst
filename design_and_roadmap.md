@@ -148,6 +148,48 @@ cutting 24 candidates to 18 with no true positive lost. So `struct_grep` is the 
 front door, and `cpg` earns its keep on the one thing patterns cannot do at all —
 reachability. Neither is a substitute for the other.
 
+### 2.1.1 Measured substrate coverage (2026-08-21)
+
+Against the actual target profile — web apps (Python, .NET, PHP, React, Vue, Angular,
+JS/TS, HTML/CSS) and mobile (Android Java/Kotlin, iOS Swift/Obj-C). Measured on this
+install, not read off a docs page.
+
+| Target | `struct_grep` (tier 0 leads) | `cpg` (tier 1 reachability) |
+|---|---|---|
+| Python — Django/Flask/FastAPI | ✅ | ✅ **verified**: `request.args.get` → `execute`/`os.system`, inter-procedural, zero code change |
+| Java / Kotlin (incl. Android) | ✅ | ✅ `javasrc2cpg` proven on WebGoat; `kotlin2cpg`, `jimple2cpg` (APK bytecode) installed, unproven |
+| PHP — Laravel/Symfony | ✅ | ⚠️ `php2cpg` installed, unproven. `$_GET` is a superglobal, not a call — likely needs a new source model |
+| JS/TS — node/express | ✅ | ✅ non-JSX only |
+| **React JSX** | ✅ | ❌ **JSX is not modelled at all** — verified: the CPG of a `.jsx` file contains no node for `dangerouslySetInnerHTML`, only `<operator>.assignment`, `fieldAccess`, `get`, `require`, `useSearchParams` |
+| Vue SFC / Angular templates | ✅ (`vue`, `html`) | ❌ template not modelled (component TS/JS logic is) |
+| **.NET / C#** | ✅ | ❌ **no frontend installed** |
+| **iOS Swift** | ✅ | ❌ **no frontend installed** |
+| Objective-C | ❌ | ❌ |
+| HTML | ✅ | ❌ |
+| CSS | ❌ | ❌ |
+
+Plain-DOM JS sits between the extremes: `eval` and `document.write` are call nodes and
+work with the existing queries today; `innerHTML =` exists as a `fieldAccess` node, so
+it is reachable but needs a field-access sink query that does not exist yet.
+
+**Consequence — this inverts the emphasis.** For this profile Joern covers roughly half
+the surface, and the half it misses (React, Vue, Angular, .NET, iOS) is where a large
+share of real review time goes. `struct_grep` is therefore the *breadth engine* and
+`cpg` the *depth engine for a subset*. The "Joern-blind but JSONL-unified" path (§10.7)
+is not a Phase 3 nicety here — it is the main path for most of the profile.
+
+**Spec-vs-reality gaps to resolve:** §10.1 names `patterns/swift/sqli.yaml` and §10.6
+puts DVIA in the corpus, but no Swift frontend is installed; same for C#. Both exist
+upstream in Joern and were simply not packaged in this install. Establish whether they
+can be added before the design leans on them further.
+
+**C/C++ (checked, deprioritised):** `c2cpg` builds and sinks match (`strcpy` args come
+back as `1:dst, 2:src`), but `reachable` returns nothing, because C taint arrives via
+*out-parameters* — `fgets(buf, …)` fills arg 1 rather than returning — and `argv` is an
+unannotated named parameter. Both need new source models (`argument N tainted after
+call`, `parameter named X of function Y`), which is query work, not manifest work. Out
+of scope for the current profile.
+
 **Joern gap policy:** Joern is the reachability spine (covers JVM/Android + most API
 backends).
 Where it's blind, `struct_grep` gives structural sink-finding (no data-flow), and
@@ -170,28 +212,46 @@ latest-wins projection over the log, serving as working memory across iterations
 
 ## 3. Vuln classes as data
 
-The substrate does not know what SSRF *is*. A manifest is the contract between the
-deterministic layer (drives queries) and the reasoning layer (drives narrative).
+The substrate does not know what SQLi *is*, and neither does any agent. A manifest is
+the contract between the deterministic layer (drives queries) and the reasoning layer
+(drives narrative).
+
+Split on two axes (§10.1): the **class** is the language-agnostic concept, the
+**pattern file** is its realization in one frontend. As built:
 
 ```yaml
-# manifests/ssrf.yaml
-id: ssrf
-sources:            # cpg/struct_grep patterns for attacker-controlled input
-  - request params, headers, body fields (per-framework)
-sinks:              # dangerous operations
-  - http client calls with non-constant URL/host
-sanitizers:         # things that break the chain (candidates to audit, not trust)
-  - allowlist checks, URL parsers with host validation
-narrative: >        # fed to hypothesize/trace agents — the "why" and "how to think"
-  SSRF requires attacker control over the destination of a server-side request.
-  Watch for redirect following, DNS rebinding gaps, allowlist bypass via parser
-  confusion, IMDS/metadata reachability once a request path is confirmed.
-seed_hypotheses:    # optional priors that kick off branching (see §4 example)
-  - "feature makes outbound requests to third-party systems"
+# manifests/classes/sqli.yaml — no patterns live here
+class: sqli
+applies_to: [java, js, swift, c]
+max_static_tier: static_reachability   # ceiling across languages (§6)
+narrative: >                           # the "why" and "how to think" — LLM only
+  A value the caller controls reaches a database engine as statement *text* rather
+  than as a bound parameter...
+seed_hypotheses:                       # priors that kick off branching (§4)
+  - The tainted value lands in an identifier position (table, column, ORDER BY)
+    where bound parameters are not usable...
 ```
 
-- `sources` / `sinks` / `sanitizers` → **deterministic** substrate queries.
-- `narrative` / `seed_hypotheses` → **LLM** reasoning.
+```yaml
+# manifests/patterns/java/sqli.yaml — named blocks whose INNER KEYS ARE QUERY
+# PARAM NAMES, plus a binding of each named query to the blocks it takes.
+sources:      {annotations: [RequestParam, ...], calls: [getParameter, ...]}
+sinks:        {sinks: [executeQuery, ...], full_name_filter: [], arg_index: "1"}
+sanitizers:   {sanitizers: [replace, escape.*, ...]}
+queries:
+  sql_sinks:         [sinks]
+  reachable:         [sources, sinks]
+  sanitizer_on_path: [sources, sinks, sanitizers]
+rules: [java/sqli]                     # struct_grep rule sets
+max_static_tier: static_reachability   # guarded: rejected unless the queries are bound
+```
+
+- `sources` / `sinks` / `sanitizers` → **deterministic** substrate queries. The loader
+  merges the referenced blocks into a params object and never learns what a parameter
+  *means*, so a new query is a line of YAML rather than a code change.
+- `narrative` / `seed_hypotheses` → **LLM** reasoning. This is the only seam through
+  which an agent learns what a class is; agents never name a class themselves.
+- Composition seam: `manifest params … | cpg query --params-from -`.
 - Existing 32-class prompt library is the seed corpus for these manifests.
 
 ---
@@ -278,6 +338,16 @@ budget:
 The `belief` store projection is rebuildable from the log at any time → full
 reproducibility and audit.
 
+**As built.** One append-only `var/log.jsonl`; the projection is recomputed on read, so
+no cache exists that could drift from the log. Ids: facts are content hashes (so
+re-running a query does not grow the log — `belief append` skips facts already present),
+while beliefs/hypotheses/findings get ULIDs, because asserting the same belief twice is
+two decisions and the second supersedes the first. **Latest-wins is decided by position
+in the log**, never by `ts` or `id`: a clock that jumps backwards must not be able to
+resurrect a superseded verdict. Superseding is reported, not silent, and the projection
+carries `superseded_count`. Verdict vocabulary is data (`config/verdicts.yaml`):
+`sound` / `unsound` / `partial` / `unknown`, each with a `prunes` flag.
+
 ---
 
 ## 6. Verification tiers (report honesty)
@@ -346,14 +416,29 @@ report       per needs_proof: recreation flow + why + code refs + tier
 
 ## 8. Roadmap
 
-**Phase 0 — Substrate foundations (no LLM).**
-`struct_grep` wrapper (opengrep + named rule sets), `cpg` wrapper (build+cache+named
-queries), `belief` CLI (append + projection), `manifest` loader/validator. Everything
-JSONL. Prove every query and rule against the corpus by hand.
+**Phase 0 — Substrate foundations (no LLM). ✅ COMPLETE.**
+`struct_grep` (opengrep + named rule sets), `cpg` (build+cache+named queries, four
+queries: `sql_sinks`, `request_sources`, `reachable`, `sanitizer_on_path`), `manifest`
+loader/validator + `detect`, `belief` (append + latest-wins projection). Everything
+JSONL, every query proven two-sided against the corpus.
 
 **Phase 1 — One class, end-to-end, flat, static.**
-SSRF manifest. orchestrator + hypothesize + report. No branching yet. Manual LLM
-gating. Output: findings with recreation flows. *This is the first useful deliverable.*
+**SQLi**, not SSRF: §10.7 freezes SQLi as class #1, and it is the class that is built
+and corpus-validated. (An earlier draft of this line said SSRF; §10 wins on contracts.)
+orchestrator + hypothesize + report. No branching yet. Manual LLM gating. Output:
+findings with recreation flows. *This is the first useful deliverable.*
+
+Phase 1 deliberately runs against **one class in one language**. The agent layer is the
+only nondeterministic component in the system; introducing it against a substrate whose
+every output is byte-reproducible means anomalies are attributable to the model rather
+than to a frontend gap, a bad rule, and a hallucination at once. WebGoat SQLi is also a
+*labelled* set — 16 flows, 3 known false positives from the generic `execute` name, one
+known-ineffective sanitizer, one second-order case — so the hypothesizer can be scored,
+not just eyeballed. Breadth waits (decided 2026-08-21).
+
+**Guard against over-fitting:** agents read `narrative` / `seed_hypotheses` from the
+manifest and must never name a vuln class themselves. If a prompt contains the word
+"SQL", that is a bug. The running check is "would this prompt work unchanged for SSRF?"
 
 **Phase 2 — Branching + learning.**
 `trace` subagent, hypothesis tree, `spend_gate`, `checkpoint` subagent, belief-store
@@ -435,14 +520,25 @@ Named `.sc` files, one per query, parameterized. The query is generic; the sink/
 
 ```
 queries/
-  sql_sinks.sc          # Call nodes matching sink pattern P
-  request_sources.sc    # request-tainted entry values
-  reachable.sc          # dataflow source → sink
-  callers.sc            # expand callers of a method
-  implementors.sc       # resolve dynamic dispatch / interface impls
-  arg_is_constant.sc    # prune: is arg N a compile-time constant?
-  sanitizer_on_path.sc  # does a candidate sanitizer sit on the flow?
+  sql_sinks.sc          # ✅ built — call nodes matching sink pattern P
+  request_sources.sc    # ✅ built — request-tainted entry values (annotations + calls)
+  reachable.sc          # ✅ built — dataflow source → sink
+  sanitizer_on_path.sc  # ✅ built — does a candidate sanitizer sit on the flow?
+  callers.sc            # not built — expand callers of a method (needed for tier 2)
+  implementors.sc       # not built — dynamic dispatch / interface impls (tier 2)
+  arg_is_constant.sc    # not built — prune: is arg N a compile-time constant?
+                        #   (partly redundant: sql_sinks already emits arg_is_literal)
 ```
+
+**Known engine limit, load-bearing.** `reachableByFlows` enumerates *representative*
+paths, not every route. Proven on WebGoat: for (`SqlInjectionLesson8` `name@43` →
+`executeQuery@62`) the engine returns only a path detouring through `log()`'s
+`replace()` and back out to the call site — the direct route 61→62, which touches no
+sanitizer, is never enumerated. Therefore **no tool may claim a flow is sanitized, and
+none does**: `sanitizer_on_path` reports candidates and scopes every count to
+`reported_*`, with `meta.paths_are_representative` stating the limit machine-visibly.
+An earlier draft emitted `unsanitized_path_exists`, which would have reported `false`
+there — making a live vulnerability look safer.
 
 - **Matching posture: portable-first.** Prefer short-name + resolution over
   frontend-specific `methodFullName` regex; tighten per-language only where the corpus
@@ -507,6 +603,17 @@ wrapper. Lifecycle: `build (cache-miss) → load → warm-query*`. The `trace` a
 
 Known-vuln repos double as regression fixtures: validate every query against ground
 truth before trusting it on client code.
+
+**Status.** WebGoat is cloned at the pinned commit and is the live oracle for all four
+queries. Juice Shop is **not yet cloned**; DVIA is **blocked** — no Swift frontend is
+installed (§2.1.1). Two in-repo fixtures carry the two-sided controls that WebGoat
+cannot: `corpus/fixtures/java_sqli_min` (sink inventory, literal vs runtime-built) and
+`corpus/fixtures/java_sqli_flow` (dataflow — a tainted path, a sanitized-but-still-
+flowing path, plus bound-parameter, constant-only and sink-less negatives, all sharing
+the same sink names so only dataflow separates them).
+
+Golden files hold facts with `ts` stripped; `UPDATE_GOLDEN=1` regenerates, and drift is
+reviewed rather than rubber-stamped.
 
 ### 10.7 Class #1
 

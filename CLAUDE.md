@@ -85,8 +85,20 @@ The substrate spine. Get this right and most of the system follows.
   applied to the CPG. Confirm it's present before trusting any reachability result.
 - **An empty result is ambiguous — always disambiguate.** No path can mean (a) genuinely
   no flow, or (b) the frontend never built the edge (unresolved call, dynamic dispatch,
-  reflection, missing dependency). Before reporting "no vuln," verify the source and sink
-  nodes actually exist in the CPG. A query that can't tell these apart is not done.
+  reflection, missing dependency), or (c) *no query can see this sink shape at all*.
+  Before reporting "no vuln," verify the source and sink nodes actually exist in the CPG.
+  A query that can't tell these apart is not done. This extends past queries: a tool that
+  scanned nothing must not exit 0, and a manifest tree with no classes is a broken install,
+  not a clean bill of health.
+- **`reachableByFlows` returns representative paths, not all routes.** Proven on WebGoat
+  Lesson8: the clean 61→62 route is never enumerated, only a detour through a `replace()`.
+  So "no clean path was reported" is NOT "every route is sanitized" — that error makes a
+  live vulnerability look safer. Scope any such count to what the engine returned and name
+  the field accordingly (`reported_*`).
+- **Node vocabulary is a hard boundary.** Every query today matches call nodes or annotated
+  parameters. A sink that is neither — a JSX attribute, a template expression, a config key
+  — cannot be reached by *any* manifest, only by a new query. Verified: `jssrc2cpg` builds a
+  `.jsx` file happily and produces no node for `dangerouslySetInnerHTML` at all.
 - **Portable-first matching** (§10.3). Match on method `.name` + a resolution step, not
   frontend-specific `methodFullName` regex. Java resolves cleanly; JS/Swift frontends are
   partial — expect gaps and validate empirically, tightening per-language only where the
@@ -123,7 +135,11 @@ The substrate spine. Get this right and most of the system follows.
 - **Corpus is the test oracle.** Golden JSONL outputs per query per fixture. A query
   change that alters golden output is reviewed, not rubber-stamped.
 - **Two-sided query tests.** Positive: the planted vuln appears. Negative: a sanitized
-  control does not. Both required before a query is trusted.
+  control does not. Both required before a query is trusted. Build the two sides from the
+  *same sink names*, so a query that passes by name-matching alone fails the test.
+- **Invariant #3 is enforced mechanically**, not by review: `test_manifest.py` greps
+  `source_analyst/**.py` and every query body for sink/source tokens. If you need one in
+  code, you are about to break the manifest seam.
 - **Determinism tests.** Same input → byte-identical facts. Re-running a query produces
   no duplicate facts (content-hash idempotence holds).
 - **Projection tests.** Belief store rebuilt from the log equals the live projection;
@@ -152,5 +168,9 @@ Any of these means pause and raise it, don't code through it:
 - You're about to change a record schema or the log format → deliberate `v` bump + note.
 - A tool wants to make an LLM call → that belongs in an agent; keep tools deterministic.
 - A query returns empty and you're about to call it "no vuln" → disambiguate first.
+- You're about to emit a field that asserts something the substrate cannot prove
+  (`sanitized`, `exploitable`, `unsanitized_path_exists`) → it's a belief, not a fact.
+- An agent prompt names a vuln class ("SQL", "XSS") → it belongs in the manifest
+  `narrative`; the prompt must work unchanged for the next class.
 - You're adding an abstraction "for later" → YAGNI; build the concrete phase need.
 - A fact is being asserted without a `src` → it's a hypothesis; label it.
