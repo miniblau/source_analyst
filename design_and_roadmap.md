@@ -21,8 +21,13 @@ sink inventories agree exactly. The dataflow spine is in: `request_sources` → 
 inter-procedural to 4 method hops. `manifest` + `detect` drive all four queries from
 `manifests/patterns/java/sqli.yaml`, so no sink list is typed by hand. `belief` closes
 Phase 0: one append-only `var/log.jsonl`, facts idempotent on content hash, trust
-decisions latest-wins by log position. **Next action = Phase 1** (§8): orchestrator +
-hypothesize + report, SQLi end-to-end.
+decisions latest-wins by log position.
+
+**Phase 1 first pass is running end to end on WebGoat.** `brief` → agent → `admit` →
+`render`: 26 cases briefed, 23 judged `needs_proof` and 3 refuted (the ProfileUpload
+`execute` name collisions), one belief recorded against the Lesson8 `replace`, 23
+findings rendered with recreation flows. **Next action** = an `orchestrator` that drives
+the chain, and scoring the hypothesizer against the labelled WebGoat set.
 
 **Known limit, load-bearing.** `reachableByFlows` enumerates *representative* paths, not
 all routes (proven on WebGoat Lesson8: the clean 61→62 route is never returned). No tool
@@ -73,8 +78,9 @@ repo/
     patterns/<lang>/        # per-language sink/source/sanitizer patterns
   queries/                 # named Joern .sc scripts (§10.3) — fixed vocabulary
   rules/<lang>/            # named opengrep rule sets (§10.3) — fixed vocabulary
-  source_analyst/          # single-purpose CLIs: cpg, struct_grep, belief, manifest, …
-  agents/                  # OpenCode subagent defs: orchestrator, hypothesize, trace, …
+  source_analyst/          # single-purpose CLIs: cpg, struct_grep, manifest, belief,
+                           #   brief, admit, render — all deterministic, zero LLM calls
+  agents/                  # agent prompts: hypothesize, report (orchestrator, trace, … later)
   corpus/                  # fixtures (WebGoat, Juice Shop, DVIA) + golden outputs
   var/                     # runtime: CPG cache, log.jsonl — XDG-style, gitignored
 ```

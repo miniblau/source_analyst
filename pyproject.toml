@@ -16,6 +16,9 @@ cpg = "source_analyst.cpg.cli:main"
 struct_grep = "source_analyst.struct_grep.cli:main"
 manifest = "source_analyst.manifest.cli:main"
 belief = "source_analyst.belief.cli:main"
+brief = "source_analyst.lifecycle.brief:main"
+admit = "source_analyst.lifecycle.admit:main"
+render = "source_analyst.lifecycle.render:main"
 
 [tool.setuptools.packages.find]
 include = ["source_analyst*"]
