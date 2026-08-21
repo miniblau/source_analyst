@@ -58,6 +58,14 @@ class TestDetect(unittest.TestCase):
         self.assertEqual([r["language"] for r in rows], ["java"])
         self.assertEqual(rows[0]["file_count"], 1)
 
+    def test_skipped_trees_are_reported(self):
+        """The skip list changes which languages are detected, so an operator
+        confirming detection has to be able to see that it acted."""
+        src = self._tree(["a.java", "node_modules/x.js", "vendor/y.js"])
+        report: dict = {}
+        detect.counts(src, language_map(), report)
+        self.assertEqual(report["skipped_trees"], 2)
+
     def test_unknown_extensions_are_ignored(self):
         src = self._tree(["README.md", "Makefile", "x.py"])
         self.assertEqual(detect.counts(src, language_map()), [])
@@ -77,9 +85,20 @@ class TestClassLoading(unittest.TestCase):
         with self.assertRaises(ManifestError):
             load_class("not_a_class")
 
-    def test_path_traversal_rejected(self):
-        with self.assertRaises(ManifestError):
-            load_class("../../etc/passwd")
+    def test_path_traversal_rejected_by_name_not_by_accident(self):
+        """Must be rejected on the NAME, before any file is opened.
+
+        Previously this passed only because the traversed-to file happened to
+        declare a different `class:` — so an out-of-tree YAML was read and
+        parsed first, and a file that did self-declare would have loaded.
+        """
+        for bad in ("../../etc/passwd", "../classes/sqli", "./sqli", "a/b"):
+            with self.assertRaises(ManifestError) as cm:
+                load_class(bad)
+            self.assertIn("invalid vuln class name", str(cm.exception), bad)
+        with self.assertRaises(ManifestError) as cm:
+            load_patterns("sqli", "../patterns/java")
+        self.assertIn("invalid language name", str(cm.exception))
 
 
 class TestPatternLoading(unittest.TestCase):
@@ -106,6 +125,33 @@ class TestPatternLoading(unittest.TestCase):
         p = load_patterns("sqli", "java")
         for name in p.rules:
             self.assertIn(name, rules.available(), f"{name} is not a named rule set")
+
+    def test_block_key_collision_is_fatal(self):
+        """Silent last-wins would drop a sink list with no diagnostic."""
+        with tempfile.TemporaryDirectory() as d:
+            root = Path(d)
+            (root / "classes").mkdir()
+            (root / "patterns" / "java").mkdir(parents=True)
+            (root / "classes" / "x.yaml").write_text(
+                "class: x\ntitle: X\napplies_to: [java]\nnarrative: n\n")
+            (root / "patterns" / "java" / "x.yaml").write_text(textwrap.dedent("""
+                class: x
+                language: java
+                a:
+                  sinks: [one]
+                b:
+                  sinks: [two]
+                queries:
+                  sql_sinks: [a, b]
+            """))
+            os.environ["SOURCE_ANALYST_MANIFESTS"] = str(root)
+            try:
+                p = load_patterns("x", "java")
+                with self.assertRaises(ManifestError) as cm:
+                    p.params_for("sql_sinks")
+                self.assertIn("already set by an earlier block", str(cm.exception))
+            finally:
+                del os.environ["SOURCE_ANALYST_MANIFESTS"]
 
     def test_unbound_query_rejected(self):
         p = load_patterns("sqli", "java")
@@ -157,6 +203,18 @@ class TestSelection(unittest.TestCase):
         self.assertEqual(vc.name, "sqli")
         self.assertEqual(realized, ["java"])
         self.assertEqual(unrealized, ["js"])
+
+    def test_empty_manifest_tree_is_a_problem_not_a_pass(self):
+        """An empty tree validated ok:true/exit 0, so a mis-pointed
+        SOURCE_ANALYST_MANIFESTS read as a healthy install and every later scan
+        would quietly have nothing to run."""
+        with tempfile.TemporaryDirectory() as d:
+            env = dict(os.environ, SOURCE_ANALYST_MANIFESTS=d)
+            proc = subprocess.run(
+                [sys.executable, "-m", "source_analyst.manifest.cli", "validate"],
+                cwd=ROOT, env=env, capture_output=True, text=True)
+            self.assertEqual(proc.returncode, 1)
+            self.assertIn("no vuln classes found", proc.stdout + proc.stderr)
 
     def test_repo_manifests_are_coherent(self):
         problems, gaps = validate_all()

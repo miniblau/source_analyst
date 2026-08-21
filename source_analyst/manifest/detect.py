@@ -20,7 +20,7 @@ SKIP_TREES = SKIP_DIRS | {
 }
 
 
-def counts(src: Path, ext_map: dict[str, list[str]]) -> list[dict]:
+def counts(src: Path, ext_map: dict[str, list[str]], report: dict | None = None) -> list[dict]:
     """Count files per language, most files first. Ties break on name so the
     output is a stable ordering, not an accident of directory traversal."""
     by_ext = {e.lower(): lang for lang, exts in ext_map.items() for e in exts}
@@ -41,5 +41,10 @@ def counts(src: Path, ext_map: dict[str, list[str]]) -> list[dict]:
          "extensions": sorted(ext_map[lang])}
         for lang, n in tally.items() if n
     ]
+    if report is not None:
+        # How much of the tree was excluded as somebody else's code. The skip
+        # list changes what languages are detected, so an operator confirming
+        # the detection needs to see it acted.
+        report["skipped_trees"] = skipped
     rows.sort(key=lambda r: (-r["file_count"], r["language"]))
     return rows

@@ -47,11 +47,12 @@ def cmd_detect(args: argparse.Namespace) -> int:
     src = Path(args.src).expanduser().resolve()
     if not src.is_dir():
         raise SystemExit(f"manifest: --src {src} is not a directory")
-    rows = detect.counts(src, language_map())
+    report: dict = {}
+    rows = detect.counts(src, language_map(), report)
     src_id = "manifest:detect"
     n = records.write_jsonl((records.fact(r, src_id) for r in rows), sys.stdout)
     _emit({"cmd": "detect", "src": str(src), "languages": n,
-           "detected": [r["language"] for r in rows]}, to_stdout=False)
+           "detected": [r["language"] for r in rows], **report}, to_stdout=False)
     return 0
 
 

@@ -56,7 +56,12 @@ val annotationRows = annotated.map { p =>
     // point (the normal case for a controller) or an unresolved edge — the
     // reviewer needs to know which, so report the count rather than filter.
     "callers"       -> p.method.caller.size,
-    "resolved"      -> !p.typeFullName.toLowerCase.contains("unresolved")
+    // For an annotation source this reports whether the ANNOTATION resolved to
+    // a full name, not whether the parameter's type did. The parameter type is
+    // java.lang.String on virtually every Spring controller, so deriving it
+    // from typeFullName was true everywhere and told a reviewer nothing.
+    "resolved"      -> p.annotation.fullName.l.exists(fn =>
+                         fn.nonEmpty && !fn.toLowerCase.contains("unresolved"))
   )
 }
 
@@ -111,8 +116,13 @@ emit(
     // Disambiguation: zero annotation sources over a CPG that resolved *no*
     // parameter annotations at all is a frontend gap, not a clean codebase.
     "cpg_annotated_params" -> cpg.parameter.where(_.annotation).size,
-    "annotation_names_present" -> ujson.Arr(
-      annotated.flatMap(_.annotation.name.l).distinct.sorted.map(ujson.Str(_))*),
+    // CPG-WIDE, not drawn from the matched set: `annotated` is already filtered
+    // by the `annotations` param, so deriving this from it made the list empty
+    // in exactly the case it exists to disambiguate — zero matches. An operator
+    // seeing matched_annotation:0 needs to know which annotation names the
+    // frontend resolved *at all*, to tell "none of ours" from "none, period".
+    "annotation_names_in_cpg" -> ujson.Arr(
+      cpg.parameter.annotation.name.l.distinct.sorted.map(ujson.Str(_))*),
     "matched_annotation" -> annotationRows.size,
     "matched_calls"      -> matchedCalls.size,
     "selected_calls"     -> callRows.size,

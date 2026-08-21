@@ -26,7 +26,6 @@ import time
 from pathlib import Path
 
 from .. import records
-from ..cpg.workspace import repo_root
 from . import rules as ruleset
 
 OPENGREP = os.environ.get("OPENGREP_BIN", "opengrep")
@@ -54,22 +53,29 @@ def _binary() -> str:
     return exe
 
 
-def opengrep_version() -> str:
-    try:
-        out = subprocess.run([_binary(), "--version"], capture_output=True, text=True, timeout=60)
-        return out.stdout.strip().splitlines()[0] if out.stdout.strip() else "unknown"
-    except Exception:
-        return "unknown"
+def _config_base() -> Path:
+    """Directory opengrep is invoked from, so `check_id` prefixes stay stable.
+
+    The rules dir's parent, not the repo root: `SOURCE_ANALYST_RULES` may point
+    outside the repo (rules.py:21), and relative_to() would then raise a raw
+    ValueError. In-repo this is the repo root, so prefixes are unchanged.
+    """
+    return ruleset.rules_dir().parent
 
 
 def _run(src: Path, rule_files: list[Path], timeout: int) -> dict:
-    """Invoke opengrep from the repo root so `check_id` prefixes stay stable."""
+    base = _config_base()
     cmd = [_binary(), "scan", "--quiet", "--json", "--error"]
     for f in rule_files:
-        cmd += ["--config", str(f.relative_to(repo_root()))]
+        cmd += ["--config", str(f.relative_to(base))]
     cmd.append(str(src))
 
-    proc = subprocess.run(cmd, cwd=repo_root(), capture_output=True, text=True, timeout=timeout)
+    try:
+        proc = subprocess.run(cmd, cwd=base, capture_output=True, text=True, timeout=timeout)
+    except subprocess.TimeoutExpired:
+        raise SystemExit(
+            f"struct_grep: opengrep timed out after {timeout}s on {src} "
+            f"(raise --timeout or STRUCT_GREP_TIMEOUT)")
     if not proc.stdout.strip():
         print(proc.stderr.strip(), file=sys.stderr)
         raise SystemExit(f"struct_grep: opengrep produced no output (exit {proc.returncode})")
@@ -88,7 +94,7 @@ def _strip_prefix(check_id: str, rule_files: list[Path]) -> str:
     if the rules moved. Strip it back to the id the rule file declares.
     """
     for f in rule_files:
-        prefix = ".".join(f.relative_to(repo_root()).parent.parts) + "."
+        prefix = ".".join(f.relative_to(_config_base()).parent.parts) + "."
         if check_id.startswith(prefix):
             return check_id[len(prefix):]
     return check_id
@@ -159,6 +165,28 @@ def cmd_scan(args: argparse.Namespace) -> int:
 
     errors = doc.get("errors", []) or []
     scanned = (doc.get("paths", {}) or {}).get("scanned", []) or []
+    skipped_rules = len(doc.get("skipped_rules", []) or [])
+
+    # Invariant #8 as an exit code, not just a meta field. A rule that failed to
+    # load, a parse error, or a tree where nothing was scanned all yield zero
+    # facts — and a caller that checks only the exit status would read that as
+    # "clean". Verified: one bad rule in a file aborts the whole scan
+    # (files_scanned 0, parse_errors 1) while every fact count is legitimately
+    # zero. Untrustworthy scans must be loud.
+    untrustworthy = []
+    if errors:
+        untrustworthy.append(f"{len(errors)} parse error(s)")
+    if skipped_rules:
+        untrustworthy.append(f"{skipped_rules} rule(s) skipped")
+    if not scanned:
+        untrustworthy.append("no files were scanned")
+
+    # Warn BEFORE the meta line: every caller (and both test harnesses) reads
+    # the last stderr line as the meta JSON, so nothing may follow it.
+    if untrustworthy:
+        log("scan is not trustworthy: " + "; ".join(untrustworthy)
+            + " — zero facts here does not mean zero findings")
+
     _emit_meta(
         {
             "cmd": "scan", "src": str(src), "rules": args.rules, "facts": n,
@@ -169,19 +197,21 @@ def cmd_scan(args: argparse.Namespace) -> int:
             "scan_meta": {
                 "files_scanned": len(scanned),
                 "parse_errors": len(errors),
+                # False means: zero facts here is NOT evidence of a clean tree.
+                "trustworthy": not untrustworthy,
                 "errors": [
                     {"type": e.get("type", ""), "path": e.get("path", ""),
                      "message": _clip(str(e.get("message", "")), 200)}
                     for e in errors[:20]
                 ],
-                "skipped_rules": len(doc.get("skipped_rules", []) or []),
+                "skipped_rules": skipped_rules,
                 "by_rule": dict(sorted(by_rule.items())),
                 "opengrep_version": doc.get("version", ""),
             },
         },
         to_stdout=False,
     )
-    return 0
+    return 2 if untrustworthy else 0
 
 
 def cmd_rules(args: argparse.Namespace) -> int:

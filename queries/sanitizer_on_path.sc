@@ -134,7 +134,8 @@ def sanitizersOn(els: List[nodes.AstNode]): List[ujson.Obj] = {
         "resolved"   -> !c.methodFullName.toLowerCase.contains("unresolved")
       )
     }
-    .sortBy(o => (o("step_index").num, o("file").str, o("line").num, o("name").str))
+    .sortBy(o => (o("step_index").num, o("file").str, o("line").num,
+                  o("name").str, o("code").str))
 }
 
 val grouped = paths
@@ -147,12 +148,17 @@ val grouped = paths
 val rows = grouped.toList.map { case (_, entries) =>
   val (srcNode, sinkNode, _) = entries.head._2
   val perPath = entries.map { case (_, (_, _, els)) => sanitizersOn(els) }
-  // Union across every path for the pair, deduped on (file, line, name).
+  // Union across every path for the pair. `code` is part of the key so two
+  // distinct calls sharing a short name on one line stay distinct —
+  // s.replace("'","''").replace("\\","") is two candidates, not one. It is
+  // NOT keyed on step_index: that varies per path for the same call and would
+  // defeat the cross-path dedupe this union exists to do.
   val union = perPath.flatten
-    .groupBy(o => (o("file").str, o("line").num, o("name").str))
+    .groupBy(o => (o("file").str, o("line").num, o("name").str, o("code").str))
     .toList
-    .map { case (_, g) => g.minBy(_("step_index").num) }
-    .sortBy(o => (o("step_index").num, o("file").str, o("line").num, o("name").str))
+    .map { case (_, g) => g.sortBy(o => (o("step_index").num, o.render())).head }
+    .sortBy(o => (o("step_index").num, o("file").str, o("line").num,
+                  o("name").str, o("code").str))
   val clean = perPath.count(_.isEmpty)
 
   ujson.Obj(

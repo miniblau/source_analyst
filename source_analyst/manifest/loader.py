@@ -16,6 +16,7 @@ blocks' keys; it never learns what a parameter means.
 from __future__ import annotations
 
 import os
+import re
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
@@ -23,6 +24,12 @@ from typing import Any
 import yaml
 
 from ..cpg.workspace import repo_root
+
+# Same guard as queries.py:29 and rules.py:17. Without it a --class/--lang
+# value is interpolated straight into a path, and load_class("../classes/sqli")
+# opens and YAML-parses an out-of-tree file before the self-declaration check
+# happens to reject it. Validate the name, do not rely on that accident.
+NAME_RE = re.compile(r"^[a-z0-9_]+$")
 
 CLASS_REQUIRED = ("class", "title", "applies_to", "narrative")
 PATTERN_REQUIRED = ("class", "language", "queries")
@@ -104,6 +111,15 @@ class Patterns:
                 f"bound queries: {', '.join(sorted(self.queries)) or '(none)'}")
         params: dict[str, Any] = {}
         for block in self.queries[query]:
+            clash = sorted(set(params) & set(self.blocks[block]))
+            # Silent last-wins here would drop a sink or sanitizer list with no
+            # diagnostic, and this is the seam the whole "patterns are data"
+            # property rests on. The current manifest avoids collisions only by
+            # naming convention, so make the next one an error, not a surprise.
+            if clash:
+                raise ManifestError(
+                    f"{self.path}: queries.{query} merges block {block!r} over a key already "
+                    f"set by an earlier block: {', '.join(clash)}")
             params.update(self.blocks[block])
         return params
 
@@ -124,6 +140,8 @@ def available_patterns() -> list[str]:
 
 
 def load_class(name: str) -> VulnClass:
+    if not NAME_RE.match(name):
+        raise ManifestError(f"invalid vuln class name {name!r} (expected [a-z0-9_]+)")
     path = manifests_dir() / "classes" / f"{name}.yaml"
     if not path.is_file():
         raise ManifestError(
@@ -150,6 +168,9 @@ def load_class(name: str) -> VulnClass:
 
 
 def load_patterns(vuln_class: str, language: str) -> Patterns:
+    for label, value in (("vuln class", vuln_class), ("language", language)):
+        if not NAME_RE.match(value):
+            raise ManifestError(f"invalid {label} name {value!r} (expected [a-z0-9_]+)")
     path = manifests_dir() / "patterns" / language / f"{vuln_class}.yaml"
     if not path.is_file():
         raise ManifestError(
@@ -232,6 +253,15 @@ def validate_all() -> tuple[list[str], list[str]]:
         language_map()
     except ManifestError as e:
         problems.append(str(e))
+
+    # An empty manifests tree previously validated as ok:true, exit 0 — so a
+    # missing or mis-pointed SOURCE_ANALYST_MANIFESTS read as a healthy install
+    # and every later scan would find nothing to run. "No manifests" is a
+    # broken install, never a clean bill of health.
+    if not available_classes():
+        problems.append(
+            f"{manifests_dir()}: no vuln classes found — nothing would run "
+            f"(is SOURCE_ANALYST_MANIFESTS pointing at the right tree?)")
 
     for name in available_classes():
         try:

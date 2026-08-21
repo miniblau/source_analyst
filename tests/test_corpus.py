@@ -110,7 +110,7 @@ class TestGolden(unittest.TestCase):
         facts, meta = self._check("webgoat", "request_sources")
         qm = meta["query_meta"]
         self.assertGreater(qm["matched_annotation"], 100)
-        self.assertIn("RequestParam", qm["annotation_names_present"])
+        self.assertIn("RequestParam", qm["annotation_names_in_cpg"])
         # An annotated controller parameter is an entry point: the framework
         # calls it, so zero CPG callers is expected and must not be read as dead.
         annotated = [f for f in facts if f["origin"] == "annotation"]
@@ -126,6 +126,10 @@ class TestGolden(unittest.TestCase):
         # CPG parsed parameters at all and simply found none annotated.
         self.assertGreater(qm["cpg_parameters"], 0)
         self.assertEqual(qm["cpg_annotated_params"], 0)
+        # The field must be CPG-wide, so it still answers "did the frontend
+        # resolve ANY annotation" when nothing matched. Derived from the
+        # matched set it was always [] here and disambiguated nothing.
+        self.assertEqual(qm["annotation_names_in_cpg"], [])
 
     # ------------------------------------------------------------------ reachable
 
