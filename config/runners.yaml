@@ -25,17 +25,39 @@ runners:
     cmd: ["python3", "{repo}/tests/stub_runner.py", "{agent}"]
     timeout: 60
 
-  # Local models at the desk. `ollama run <model>` takes the prompt on stdin.
+  # ANY OpenAI-compatible /chat/completions endpoint — llama.cpp's llama-server,
+  # Ollama's /v1, LM Studio, vLLM, an internal gateway, a hosted API. Which one is
+  # LLM_BASE_URL and LLM_MODEL in the environment, not a line in this file, so the
+  # same runner follows you from the desk to work without an edit here.
+  #
+  #   llama-server -m <gguf> -c 32768 --host 127.0.0.1 --port 8080
+  #   LLM_BASE_URL=http://127.0.0.1:8080/v1 LLM_MODEL=local
+  #
+  # Keep the server WARM across chunks, exactly as the Joern server stays warm:
+  # a 20GB model reloaded per batch costs more than the inference.
+  openai_compat:
+    cmd: ["python3", "{repo}/tools/openai_chat.py",
+          "--schema", "{repo}/config/schemas/{agent}.json"]
+    timeout: 1800
+
+  # Same endpoint, unconstrained output — for a model or server with no support for
+  # constrained decoding, and for measuring how well a model follows the format on
+  # its own. Which of the two you used shows up as `schema` in the run meta.
+  openai_compat_free:
+    cmd: ["python3", "{repo}/tools/openai_chat.py"]
+    timeout: 1800
+
+  # Ollama's own CLI, if you would rather not run a server.
   ollama:
     cmd: ["ollama", "run", "{model}"]
-    model: qwen2.5-coder:14b
-    timeout: 900
+    model: qwen3-coder:30b
+    timeout: 1800
 
   # Intended runner (§7). Flags depend on your opencode version and agent config;
   # this is a starting point to adjust, not a verified invocation.
   opencode:
     cmd: ["opencode", "run", "--agent", "{agent}"]
-    timeout: 900
+    timeout: 1800
 
 # Per-agent overrides. Judgement and prose are different jobs and may deserve
 # different models; that decision is data, made here.

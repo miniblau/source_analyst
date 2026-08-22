@@ -166,6 +166,71 @@ class TestBrief(unittest.TestCase):
         self.assertEqual([r for r in rows if r.get("kind") == "case"], [])
 
 
+class TestChunking(unittest.TestCase):
+    """Batching, because a 38k-token briefing is a worse prompt than seven small
+    ones — and because most models cannot hold it at all."""
+
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory()
+        self.log = Path(self.tmp.name) / "log.jsonl"
+        self.env = dict(os.environ, SOURCE_ANALYST_LOG=str(self.log))
+        self.addCleanup(self.tmp.cleanup)
+        # Five cases at distinct sinks.
+        store.append([flow_fact(sink_line=20 + i, source_name=f"q{i}") for i in range(5)],
+                     self.log)
+
+    def run_brief(self, *argv):
+        return subprocess.run(
+            [sys.executable, "-m", "source_analyst.lifecycle.brief", "--class", "sqli",
+             "--lang", "java", "--agent", "hypothesize", *argv],
+            cwd=ROOT, env=self.env, capture_output=True, text=True)
+
+    def rows(self, *argv):
+        r = self.run_brief(*argv)
+        self.assertEqual(r.returncode, 0, r.stderr)
+        return [json.loads(l) for l in r.stdout.splitlines()]
+
+    def test_chunks_count_is_plain_on_stdout(self):
+        """A shell driver must be able to loop without parsing JSON."""
+        r = self.run_brief("--chunk-size", "2", "--chunks")
+        self.assertEqual(r.stdout.strip(), "3")
+
+    def test_every_case_appears_exactly_once_across_chunks(self):
+        seen = []
+        for i in range(3):
+            seen += [c["sink"]["line"] for c in self.rows("--chunk-size", "2", "--chunk", str(i))
+                     if c.get("kind") == "case"]
+        self.assertEqual(sorted(seen), [20, 21, 22, 23, 24])
+        self.assertEqual(len(seen), len(set(seen)), "a case must not be briefed twice")
+
+    def test_chunk_header_says_it_is_a_chunk(self):
+        """An agent given two cases must not read that as the whole set — it changes
+        what 'the only one of its kind' would mean."""
+        h = self.rows("--chunk-size", "2", "--chunk", "1")[0]
+        self.assertEqual(h["chunk"], {"index": 1, "of": 3, "rows": 2, "rows_total": 5})
+        self.assertEqual(h["cases"], 2)
+
+    def test_last_chunk_is_short_not_padded(self):
+        cases = [c for c in self.rows("--chunk-size", "2", "--chunk", "2")
+                 if c.get("kind") == "case"]
+        self.assertEqual(len(cases), 1)
+
+    def test_chunk_past_the_end_is_an_error_not_an_empty_success(self):
+        """Silently briefing nothing would look to the pipeline like a model that
+        had nothing to say."""
+        r = self.run_brief("--chunk-size", "2", "--chunk", "3")
+        self.assertNotEqual(r.returncode, 0)
+        self.assertIn("past the last batch", r.stderr)
+
+    def test_chunk_without_size_is_rejected(self):
+        self.assertNotEqual(self.run_brief("--chunk", "1").returncode, 0)
+
+    def test_unchunked_briefing_is_unchanged(self):
+        rows = self.rows()
+        self.assertEqual(rows[0]["chunk"], {"index": 0, "of": 1, "rows": 5, "rows_total": 5})
+        self.assertEqual(len([r for r in rows if r.get("kind") == "case"]), 5)
+
+
 class TestPromptHygiene(unittest.TestCase):
     """Over-fitting guard (§8): agents learn the class from the manifest, never
     from their own prompt. A prompt naming a class would not survive class #2."""

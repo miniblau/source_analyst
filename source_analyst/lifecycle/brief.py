@@ -120,7 +120,17 @@ def main(argv: list[str] | None = None) -> int:
     p.add_argument("--limit", type=int, help="first N cases only (for a cheap dry run)")
     p.add_argument("--status", default="proposed",
                    help="report agent: which hypothesis status to brief on")
+    p.add_argument("--chunk-size", type=int, metavar="N",
+                   help="emit rows in batches of N; see --chunk")
+    p.add_argument("--chunk", type=int, default=0, metavar="I",
+                   help="which batch to emit, 0-based (default 0)")
+    p.add_argument("--chunks", action="store_true",
+                   help="print how many batches --chunk-size yields, and exit")
     args = p.parse_args(argv)
+    if args.chunk_size is not None and args.chunk_size < 1:
+        raise SystemExit("brief: --chunk-size must be at least 1")
+    if args.chunk and args.chunk_size is None:
+        raise SystemExit("brief: --chunk needs --chunk-size")
 
     try:
         vc = load_class(args.vuln_class)
@@ -146,13 +156,10 @@ def main(argv: list[str] | None = None) -> int:
     }
 
     if args.agent == "hypothesize":
-        cases = _cases(log)
+        rows = _cases(log)
         if args.limit:
-            cases = cases[:args.limit]
-        beliefs = _beliefs_for(cases)
-        header["cases"] = len(cases)
-        header["prior_beliefs"] = len(beliefs)
-        rows = cases
+            rows = rows[:args.limit]
+        header["status_filter"] = None
     else:
         wanted = {h["id"]: h for h in log
                   if h.get("type") == "hypothesis" and h.get("status") == args.status}
@@ -161,9 +168,32 @@ def main(argv: list[str] | None = None) -> int:
         for hid, h in sorted(wanted.items()):
             rows.append({"kind": "hypothesis", "hypothesis": h,
                          "evidence": [by_id[e] for e in h.get("evidence", []) if e in by_id]})
-        beliefs = []
-        header["hypotheses"] = len(rows)
+        if args.limit:
+            rows = rows[:args.limit]
         header["status_filter"] = args.status
+
+    total = len(rows)
+    n_chunks = 1 if args.chunk_size is None else max(1, -(-total // args.chunk_size))
+    if args.chunks:
+        # A driver needs the batch count before it can loop. Deliberately on stdout
+        # and nothing else, so `for i in $(seq 0 $(($(brief ... --chunks) - 1)))`
+        # works without parsing JSON.
+        print(n_chunks)
+        return 0
+    if args.chunk >= n_chunks:
+        raise SystemExit(f"brief: --chunk {args.chunk} is past the last batch "
+                         f"({n_chunks} batch(es) of {args.chunk_size} over {total} row(s))")
+    if args.chunk_size is not None:
+        start = args.chunk * args.chunk_size
+        rows = rows[start:start + args.chunk_size]
+
+    # An agent given four cases must not conclude that four is all there is —
+    # it changes what "this is the only one of its kind" would mean.
+    header["chunk"] = {"index": args.chunk, "of": n_chunks, "rows": len(rows),
+                       "rows_total": total}
+    beliefs = _beliefs_for(rows) if args.agent == "hypothesize" else []
+    header["cases" if args.agent == "hypothesize" else "hypotheses"] = len(rows)
+    header["prior_beliefs"] = len(beliefs)
 
     print(json.dumps(header, ensure_ascii=False, separators=(",", ":")))
     for b in beliefs:
@@ -173,6 +203,7 @@ def main(argv: list[str] | None = None) -> int:
         print(json.dumps(row, ensure_ascii=False, separators=(",", ":")))
 
     print(json.dumps({"cmd": "brief", "agent": args.agent, "rows": len(rows),
+                      "rows_total": total, "chunk": args.chunk, "chunks": n_chunks,
                       "beliefs": len(beliefs), "log": str(store.log_path())},
                      separators=(",", ":")), file=sys.stderr)
     return 0

@@ -1,0 +1,26 @@
+{
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["records"],
+  "properties": {
+    "records": {
+      "type": "array",
+      "description": "One finding per hypothesis in the briefing.",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["hypothesis", "title", "tier", "severity", "recreation", "refs"],
+        "properties": {
+          "hypothesis": {"type": "string"},
+          "title": {"type": "string"},
+          "tier": {"type": "string",
+                   "enum": ["static_pattern", "static_reachability", "static_trace"]},
+          "severity": {"type": "string",
+                       "enum": ["info", "low", "medium", "high", "critical"]},
+          "recreation": {"type": "string"},
+          "refs": {"type": "array", "items": {"type": "string"}, "minItems": 1}
+        }
+      }
+    }
+  }
+}

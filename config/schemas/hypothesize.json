@@ -1,0 +1,28 @@
+{
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["records"],
+  "properties": {
+    "records": {
+      "type": "array",
+      "description": "One record per case in the briefing, in the order given.",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["statement", "vuln_class", "status", "confidence", "evidence",
+                     "case", "reasoning"],
+        "properties": {
+          "statement": {"type": "string"},
+          "vuln_class": {"type": "string"},
+          "status": {"type": "string",
+                     "enum": ["proposed", "investigating", "needs_proof", "refuted",
+                              "inconclusive"]},
+          "confidence": {"type": "number", "minimum": 0, "maximum": 1},
+          "evidence": {"type": "array", "items": {"type": "string"}, "minItems": 1},
+          "case": {"type": "string"},
+          "reasoning": {"type": "string"}
+        }
+      }
+    }
+  }
+}

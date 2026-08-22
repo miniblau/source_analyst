@@ -123,6 +123,13 @@ The substrate spine. Get this right and most of the system follows.
 - **Tools own no state** beyond the log. Rerunnable, idempotent where facts are produced.
 - **The manifest is the seam** between deterministic and reasoning layers: its
   `sources/sinks/sanitizers` drive queries, its `narrative/seed_hypotheses` drive the model.
+- **Brief in batches, and say so.** The full WebGoat briefing is ~38k tokens; most
+  models cannot hold it and none reasons well across it. `brief --chunk-size` batches it,
+  and the header tells the agent it is holding a chunk — an agent given four cases must
+  not conclude four is all there is. A batch that fails stops the pass: half a pass
+  silently admitted is worse than none, because the log then looks complete.
+- **Keep the model server warm**, for the same reason the Joern server stays warm.
+  Reloading a 20GB model per batch costs more than the inference does.
 - **`run_agent` is the seam, and the only one.** It spawns a command from
   `config/runners.yaml` and moves bytes; it makes no API call, holds no key, and names no
   vendor — a test fails if a provider or model name appears anywhere in `source_analyst/`.

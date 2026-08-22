@@ -30,8 +30,9 @@ findings rendered with recreation flows. `run_agent` now closes the loop: the mo
 reached through a command named in `config/runners.yaml`, so the whole chain runs
 unattended and — with the stub runner — under test with zero model calls. `score` closes
 the other half: 16 labelled WebGoat sites, and the null-baseline stub already measurably
-loses to the real run (precision 0.885 vs 1.0, confidence separation 0.0). **Next action**
-= point `run_agent` at a local model and read its scorecard.
+loses to the real run (precision 0.885 vs 1.0, confidence separation 0.0). Briefings chunk
+(~9k tokens a batch) and the generic OpenAI-compatible runner is wired. **Next action** =
+start a model server, run `tools/pass.sh`, read the scorecard.
 
 **Known limit, load-bearing.** `reachableByFlows` enumerates *representative* paths, not
 all routes (proven on WebGoat Lesson8: the clean 61→62 route is never returned). No tool
@@ -89,6 +90,8 @@ repo/
   agents/                  # agent prompts: hypothesize, report (orchestrator, trace, … later)
   corpus/                  # fixtures (WebGoat, Juice Shop, DVIA) + golden outputs
     ground_truth/          # labelled case sets — the oracle `score` measures agents on
+  config/schemas/          # per-agent JSON schemas for constrained decoding
+  tools/                   # runner shims and the chunked-pass loop — NOT the substrate
   var/                     # runtime: CPG cache, log.jsonl, agent_runs/ — gitignored
 ```
 
@@ -434,6 +437,41 @@ reach `admit` looking like a model that judged there was nothing to say.
 `needs_proof` per case and judges nothing. It exists so the chain is testable without a
 model, and so model comparison has a floor: a model that produces the same rows as the
 stub has added nothing, which is only visible if the stub is something you can run.
+
+**Runner catalog.** `openai_compat` is the one that matters: `tools/openai_chat.py` is a
+stdlib shim onto any OpenAI-compatible `/chat/completions`, so llama.cpp's `llama-server`,
+Ollama's `/v1`, LM Studio, vLLM, an internal gateway and a hosted API are all the same
+runner with a different `LLM_BASE_URL`. Which server answers is **environment, not a line
+in the repo** — that is what lets the same setup follow you from the desk to work. There
+is a `_free` variant with no constrained decoding, `ollama` for its own CLI, and
+`opencode` for §7's intended host.
+
+**Constrained decoding — `config/schemas/<agent>.json`.** With `--schema` the request
+asks the endpoint to constrain output and the shim flattens `{"records": [...]}` into
+JSONL. This takes "did the model remember the output format" out of the measurement, so a
+scorecard reports judgement rather than formatting. It is **never** retried unconstrained
+on rejection: a silent downgrade would mean scoring a setup you did not think you ran.
+A test asserts each schema's required fields are a superset of what `admit` demands and
+that its enums match the config vocabulary, so schema and gate cannot drift apart.
+
+**Chunking — `brief --chunk-size N --chunk I`, added 2026-08-22.** The full WebGoat
+briefing is ~38k tokens (115KB; path `steps` carry code), which most models cannot hold
+and none reasons well across. Seven batches of four are ~9k tokens each. Batching is
+lossless — the chunked stub pass scores identically to the unchunked one — and the header
+carries `chunk: {index, of, rows, rows_total}` so an agent handed four cases does not read
+that as the whole set. `brief --chunks` prints the batch count as a bare integer so a
+shell driver can loop without parsing JSON; `tools/pass.sh` is that loop.
+
+```
+llama-server -m <model>.gguf -c 32768 --host 127.0.0.1 --port 8080   # keep it WARM
+export LLM_BASE_URL=http://127.0.0.1:8080/v1 SOURCE_ANALYST_RUNNER=openai_compat
+tools/pass.sh hypothesize sqli java 4
+tools/pass.sh report      sqli java 6
+score --class sqli --target webgoat --src agent:hypothesize
+```
+
+The model server stays warm across batches for the same reason the Joern server does:
+reloading a 20GB model per batch costs more than the inference.
 
 ### Decomposition of "are there any SSRF here?"
 
