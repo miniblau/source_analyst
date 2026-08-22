@@ -20,6 +20,7 @@ brief = "source_analyst.lifecycle.brief:main"
 admit = "source_analyst.lifecycle.admit:main"
 render = "source_analyst.lifecycle.render:main"
 run_agent = "source_analyst.lifecycle.run_agent:main"
+score = "source_analyst.lifecycle.score:main"
 
 [tool.setuptools.packages.find]
 include = ["source_analyst*"]

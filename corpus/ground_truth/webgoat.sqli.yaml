@@ -1,0 +1,146 @@
+# Ground truth for the WebGoat SQLi case set — the oracle a hypothesizer is scored against.
+#
+# Labels are DATA, like everything else about a vuln class (invariant #3). `score`
+# reads this file and knows nothing about what a label means beyond the vocabulary
+# below; adding a target or a class is a new file here, never a code change.
+#
+# Every label was checked by reading the method at the cited line, not recalled from
+# what WebGoat is famous for. `why` records what was read, so a wrong label can be
+# argued with rather than trusted.
+#
+# Scope: exactly the 16 sink sites the substrate reported on the pinned commit. A
+# site the substrate never reached cannot be scored here — that is a substrate gap
+# and belongs in §10.6, not in a model's score.
+
+target: webgoat
+commit: 7517acca95d9851da706452454c223dd13545ef4
+class: sqli
+language: java
+
+# vulnerable      untrusted input reaches SQL text; a hypothesizer that refutes this
+#                 has produced a false negative, the expensive error
+# not_this_class  the sink name matched a method that is not a database call at all;
+#                 a hypothesizer that keeps this has produced noise
+labels: [vulnerable, not_this_class]
+
+sites:
+  - sink: src/main/java/org/owasp/webgoat/lessons/challenges/challenge5/Assignment5.java:44
+    sources: [username_login, password_login]
+    label: vulnerable
+    why: >-
+      prepareStatement is called with both parameters already concatenated into the
+      SQL text, so nothing is ever bound.
+    discriminator: >-
+      The sink name is `prepareStatement`. A reasoner that treats the *name* as the
+      mitigation refutes a live vulnerability here. This is the single most
+      informative site in the set.
+
+  - sink: src/main/java/org/owasp/webgoat/lessons/pathtraversal/ProfileUpload.java:43
+    sources: [file]
+    label: not_this_class
+    why: >-
+      `super.execute(file, fullName, username)` — a file-upload handler. The manifest
+      lists the short name `execute` as a sink and this is what that costs.
+
+  - sink: src/main/java/org/owasp/webgoat/lessons/pathtraversal/ProfileUploadFix.java:43
+    sources: [file]
+    label: not_this_class
+    why: same file-upload base method as ProfileUpload; not a database call.
+
+  - sink: src/main/java/org/owasp/webgoat/lessons/pathtraversal/ProfileUploadRemoveUserInput.java:41
+    sources: [file]
+    label: not_this_class
+    why: same file-upload base method as ProfileUpload; not a database call.
+
+  - sink: src/main/java/org/owasp/webgoat/lessons/sqlinjection/advanced/SqlInjectionChallenge.java:62
+    sources: [username]
+    label: vulnerable
+    why: >-
+      registration flow concatenates `username` into
+      "select userid from sql_challenge_users where userid = '" + username + "'".
+
+  - sink: src/main/java/org/owasp/webgoat/lessons/sqlinjection/advanced/SqlInjectionLesson6a.java:72
+    sources: [userId]
+    label: vulnerable
+    why: >-
+      `"SELECT * FROM user_data WHERE last_name = '" + accountName + "'"` executed
+      directly; the lesson's own comment gives the UNION payload.
+    discriminator: >-
+      `matches` appears on the path and is reported as a sanitizer candidate, but
+      `unionQueryChecker` only *detects* a UNION to score the lesson — it filters
+      nothing. Treating a sanitizer candidate as a defence loses this.
+
+  - sink: src/main/java/org/owasp/webgoat/lessons/sqlinjection/introduction/SqlInjectionLesson10.java:56
+    sources: [action_string]
+    label: vulnerable
+    why: >-
+      "SELECT * FROM access_log WHERE action LIKE '%" + action + "%'" executed via
+      createStatement.
+
+  - sink: src/main/java/org/owasp/webgoat/lessons/sqlinjection/introduction/SqlInjectionLesson2.java:49
+    sources: [query]
+    label: vulnerable
+    why: the request parameter IS the statement text — executeQuery(query) verbatim.
+
+  - sink: src/main/java/org/owasp/webgoat/lessons/sqlinjection/introduction/SqlInjectionLesson3.java:47
+    sources: [query]
+    label: vulnerable
+    why: executeUpdate(query) where query is the request parameter verbatim.
+
+  - sink: src/main/java/org/owasp/webgoat/lessons/sqlinjection/introduction/SqlInjectionLesson4.java:46
+    sources: [query]
+    label: vulnerable
+    why: executeUpdate(query) where query is the request parameter verbatim.
+
+  - sink: src/main/java/org/owasp/webgoat/lessons/sqlinjection/introduction/SqlInjectionLesson5a.java:52
+    sources: [account, operator, injection]
+    label: vulnerable
+    why: three request parameters concatenated into the statement text before execution.
+
+  - sink: src/main/java/org/owasp/webgoat/lessons/sqlinjection/introduction/SqlInjectionLesson5b.java:48
+    sources: [userid]
+    label: vulnerable
+    why: >-
+      "... WHERE Login_Count = ? and userid= " + accountName — one parameter is bound
+      and the other is concatenated into the same statement.
+    discriminator: >-
+      A partially parameterized statement. `prepareStatement` and a `?` are both
+      present and neither protects the injected half.
+
+  - sink: src/main/java/org/owasp/webgoat/lessons/sqlinjection/introduction/SqlInjectionLesson8.java:142
+    sources: [name, auth_tan]
+    label: vulnerable
+    why: >-
+      second order — the tainted query text is passed to the static helper `log()`,
+      which applies `action.replace('\'', '"')` and concatenates the result into an
+      INSERT. The quote swap is not a defence against a payload that needs no quote.
+    discriminator: >-
+      Reached only across a static-helper call, and the only sanitizer candidate on
+      the path is the ineffective one. Both halves have to be got right.
+
+  - sink: src/main/java/org/owasp/webgoat/lessons/sqlinjection/introduction/SqlInjectionLesson8.java:62
+    sources: [name, auth_tan]
+    label: vulnerable
+    why: >-
+      "SELECT * FROM employees WHERE last_name = '" + name + "' AND auth_tan = '"
+      + auth_tan + "'" executed directly.
+    discriminator: >-
+      The site where `reachableByFlows` never enumerates the clean 61->62 route and
+      reports only the detour through `replace`. Absence of a clean reported path is
+      not evidence of safety, and this is the case that proves it.
+
+  - sink: src/main/java/org/owasp/webgoat/lessons/sqlinjection/introduction/SqlInjectionLesson9.java:65
+    sources: [name, auth_tan]
+    label: vulnerable
+    why: concatenated UPDATE executed via statement.execute.
+
+  - sink: src/main/java/org/owasp/webgoat/lessons/sqlinjection/mitigation/Servers.java:50
+    sources: [column]
+    label: vulnerable
+    why: >-
+      `order by " + column` inside a prepareStatement call, with no allow-list
+      anywhere in the class.
+    discriminator: >-
+      Lives under `mitigation/` and uses prepareStatement, so both the path and the
+      sink name suggest safety. ORDER BY cannot be bound; only reading the string
+      concatenation settles it.

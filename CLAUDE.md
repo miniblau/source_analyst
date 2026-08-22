@@ -152,6 +152,15 @@ The substrate spine. Get this right and most of the system follows.
   latest-wins keying on `subject+predicate+object` is exercised with a supersede case.
 - **The deterministic core is tested with zero LLM calls.** Agent prompts are evaluated
   separately and empirically, never blocking the substrate's test suite.
+- **Agents are measured, not tested.** `score` grades a run against a labelled corpus set
+  (`corpus/ground_truth/<target>.<class>.yaml`). Three things it must never conflate, and
+  neither may you: a case the agent *dropped* that was real (false negative), a labelled
+  site the *substrate* never offered (a substrate gap, not a model miss), and a hypothesis
+  about an *unlabelled* site (unscored, not correct). Grade on evidence facts, never on
+  the `case` string the agent wrote about itself.
+- **Keep the null baseline runnable.** `tests/stub_runner.py` judges nothing and scores
+  0.885 precision with 0.0 confidence separation. A model that cannot beat it has added
+  nothing, and that is only visible because the floor is a thing you can execute.
 
 ---
 

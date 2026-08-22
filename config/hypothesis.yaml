@@ -5,34 +5,44 @@
 # `requires_dynamic` is the guard that keeps v1 honest: static-only evidence may
 # never reach `confirmed`, no matter how convincing a path looks. The v1 ceiling
 # is needs_proof plus a good writeup (§4, §6).
+#
+# `retains_case` says whether a case in this status is still on the reviewer's
+# desk. It exists so `score` can measure an agent without deciding for itself what
+# any status means — the vocabulary owns its meaning, the tool just reads it.
 
 proposed:
+  retains_case: true
   terminal: false
   requires_dynamic: false
   claim: stated, not yet investigated
 
 investigating:
+  retains_case: true
   terminal: false
   requires_dynamic: false
   claim: substrate queries are being run against it
 
 needs_proof:
+  retains_case: true
   terminal: true
   requires_dynamic: false
   claim: supported by substrate evidence; needs a human or a running target to close
          — THE V1 CEILING
 
 refuted:
+  retains_case: false
   terminal: true
   requires_dynamic: false
   claim: substrate evidence contradicts it
 
 inconclusive:
+  retains_case: true
   terminal: true
   requires_dynamic: false
   claim: investigated; the substrate cannot settle it either way
 
 confirmed:
+  retains_case: true
   terminal: true
   requires_dynamic: true      # refused while the run is static-only
   claim: a payload was driven through a running target and the sink misbehaved

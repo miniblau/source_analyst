@@ -3,6 +3,7 @@ corpus/*
 !corpus/golden/
 !corpus/fixtures/
 !corpus/fixtures.json
+!corpus/ground_truth/
 __pycache__/
 *.egg-info/
 .venv/

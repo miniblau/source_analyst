@@ -28,8 +28,10 @@ decisions latest-wins by log position.
 `execute` name collisions), one belief recorded against the Lesson8 `replace`, 23
 findings rendered with recreation flows. `run_agent` now closes the loop: the model is
 reached through a command named in `config/runners.yaml`, so the whole chain runs
-unattended and — with the stub runner — under test with zero model calls. **Next action**
-= scoring a real model against the labelled WebGoat set, with the stub as the floor.
+unattended and — with the stub runner — under test with zero model calls. `score` closes
+the other half: 16 labelled WebGoat sites, and the null-baseline stub already measurably
+loses to the real run (precision 0.885 vs 1.0, confidence separation 0.0). **Next action**
+= point `run_agent` at a local model and read its scorecard.
 
 **Known limit, load-bearing.** `reachableByFlows` enumerates *representative* paths, not
 all routes (proven on WebGoat Lesson8: the clean 61→62 route is never returned). No tool
@@ -83,9 +85,10 @@ repo/
   config/                  # vocabulary as data: tiers, verdicts, statuses, languages,
                            #   runners (the ONLY file that may name a model or provider)
   source_analyst/          # single-purpose CLIs: cpg, struct_grep, manifest, belief,
-                           #   brief, run_agent, admit, render — all deterministic
+                           #   brief, run_agent, admit, render, score — all deterministic
   agents/                  # agent prompts: hypothesize, report (orchestrator, trace, … later)
   corpus/                  # fixtures (WebGoat, Juice Shop, DVIA) + golden outputs
+    ground_truth/          # labelled case sets — the oracle `score` measures agents on
   var/                     # runtime: CPG cache, log.jsonl, agent_runs/ — gitignored
 ```
 
@@ -463,9 +466,9 @@ JSONL, every query proven two-sided against the corpus.
 and corpus-validated. (An earlier draft of this line said SSRF; §10 wins on contracts.)
 orchestrator + hypothesize + report. No branching yet. Manual LLM gating. Output:
 findings with recreation flows. *This is the first useful deliverable.* Built:
-`brief` → `run_agent` → `admit` → `render`, proven end to end on WebGoat and in test
-against the stub runner. Remaining: the `orchestrator` prompt itself (§7 — the primary
-you talk to, not a Python tool), and scoring a model against the labelled set.
+`brief` → `run_agent` → `admit` → `render` → `score`, proven end to end on WebGoat and
+in test against the stub runner. Remaining: the `orchestrator` prompt itself (§7 — the
+primary you talk to, not a Python tool), and a scorecard from a second model.
 
 Phase 1 deliberately runs against **one class in one language**. The agent layer is the
 only nondeterministic component in the system; introducing it against a substrate whose
@@ -653,6 +656,16 @@ the same sink names so only dataflow separates them).
 
 Golden files hold facts with `ts` stripped; `UPDATE_GOLDEN=1` regenerates, and drift is
 reviewed rather than rubber-stamped.
+
+**Labelled case set — added 2026-08-22.** `corpus/ground_truth/webgoat.sqli.yaml` labels
+all 16 sink sites the substrate reports on the pinned commit: 13 `vulnerable`, 3
+`not_this_class` (the ProfileUpload file-upload `execute`). Every label was settled by
+reading the method at the cited line and carries a `why`, so it can be argued with rather
+than trusted; five carry a `discriminator` naming what a careless reasoner gets wrong
+there — `prepareStatement` with the parameters already concatenated (Assignment5:44), a
+sanitizer candidate that only *detects* a UNION (6a:72), a half-bound statement (5b:48),
+the second-order `log()` helper (8:142), and an ORDER BY under `mitigation/` (Servers:50).
+This is what `score` reads; agents are **measured** against it, not tested.
 
 ### 10.7 Class #1
 
