@@ -123,6 +123,12 @@ The substrate spine. Get this right and most of the system follows.
 - **Tools own no state** beyond the log. Rerunnable, idempotent where facts are produced.
 - **The manifest is the seam** between deterministic and reasoning layers: its
   `sources/sinks/sanitizers` drive queries, its `narrative/seed_hypotheses` drive the model.
+- **`run_agent` is the seam, and the only one.** It spawns a command from
+  `config/runners.yaml` and moves bytes; it makes no API call, holds no key, and names no
+  vendor — a test fails if a provider or model name appears anywhere in `source_analyst/`.
+  So "a tool wants to make an LLM call" is still a smell: the answer is to go *through*
+  the seam, never to open a second one. `admit` remains the only door into the log, and
+  it re-validates whatever comes back.
 - **Only `trace` loops.** Keep iteration in one place; other agents are single-shot.
 - **New capability decision tree:** is it factual ground truth? → substrate tool. Is it
   vuln knowledge? → manifest. Is it interpretation/selection? → agent prompt. Nothing

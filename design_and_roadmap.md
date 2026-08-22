@@ -26,8 +26,10 @@ decisions latest-wins by log position.
 **Phase 1 first pass is running end to end on WebGoat.** `brief` → agent → `admit` →
 `render`: 26 cases briefed, 23 judged `needs_proof` and 3 refuted (the ProfileUpload
 `execute` name collisions), one belief recorded against the Lesson8 `replace`, 23
-findings rendered with recreation flows. **Next action** = an `orchestrator` that drives
-the chain, and scoring the hypothesizer against the labelled WebGoat set.
+findings rendered with recreation flows. `run_agent` now closes the loop: the model is
+reached through a command named in `config/runners.yaml`, so the whole chain runs
+unattended and — with the stub runner — under test with zero model calls. **Next action**
+= scoring a real model against the labelled WebGoat set, with the stub as the floor.
 
 **Known limit, load-bearing.** `reachableByFlows` enumerates *representative* paths, not
 all routes (proven on WebGoat Lesson8: the clean 61→62 route is never returned). No tool
@@ -78,11 +80,13 @@ repo/
     patterns/<lang>/        # per-language sink/source/sanitizer patterns
   queries/                 # named Joern .sc scripts (§10.3) — fixed vocabulary
   rules/<lang>/            # named opengrep rule sets (§10.3) — fixed vocabulary
+  config/                  # vocabulary as data: tiers, verdicts, statuses, languages,
+                           #   runners (the ONLY file that may name a model or provider)
   source_analyst/          # single-purpose CLIs: cpg, struct_grep, manifest, belief,
-                           #   brief, admit, render — all deterministic, zero LLM calls
+                           #   brief, run_agent, admit, render — all deterministic
   agents/                  # agent prompts: hypothesize, report (orchestrator, trace, … later)
   corpus/                  # fixtures (WebGoat, Juice Shop, DVIA) + golden outputs
-  var/                     # runtime: CPG cache, log.jsonl — XDG-style, gitignored
+  var/                     # runtime: CPG cache, log.jsonl, agent_runs/ — gitignored
 ```
 
 **Substrate prerequisites.** `joern` (4.0.604 validated) and `opengrep` (1.27.1
@@ -411,6 +415,23 @@ may assert, which is what makes a weaker or unfamiliar model *safe* to use here:
 hallucinated fact reference is rejected at the door rather than trusted. Intended
 runner is OpenCode; nothing in the design depends on it.
 
+**The seam is `run_agent` — built 2026-08-22.** It spawns a command from
+`config/runners.yaml`, writes the agent prompt plus the briefing to its stdin, and reads
+JSON objects off its stdout; that file is the only place in the repo where a provider or
+model name may appear, and `tests/test_run_agent.py` fails if one leaks into code. Prose
+around the JSON is discarded and *counted* (`discarded_lines` in the run meta) rather
+than quietly cleaned up — how much slop a model produces is a fact about that model.
+Every run writes a transcript to `var/agent_runs/<ulid>.<agent>.txt` holding the exact
+bytes in and out, because a nondeterministic step needs provenance a surprising
+hypothesis can be traced back to. Two outcomes are non-zero exits, deliberately: a runner
+that failed, and a runner that produced no records at all — the second would otherwise
+reach `admit` looking like a model that judged there was nothing to say.
+
+**The null baseline.** `tests/stub_runner.py` is a runner that emits one undifferentiated
+`needs_proof` per case and judges nothing. It exists so the chain is testable without a
+model, and so model comparison has a floor: a model that produces the same rows as the
+stub has added nothing, which is only visible if the stub is something you can run.
+
 ### Decomposition of "are there any SSRF here?"
 
 ```
@@ -441,7 +462,10 @@ JSONL, every query proven two-sided against the corpus.
 **SQLi**, not SSRF: §10.7 freezes SQLi as class #1, and it is the class that is built
 and corpus-validated. (An earlier draft of this line said SSRF; §10 wins on contracts.)
 orchestrator + hypothesize + report. No branching yet. Manual LLM gating. Output:
-findings with recreation flows. *This is the first useful deliverable.*
+findings with recreation flows. *This is the first useful deliverable.* Built:
+`brief` → `run_agent` → `admit` → `render`, proven end to end on WebGoat and in test
+against the stub runner. Remaining: the `orchestrator` prompt itself (§7 — the primary
+you talk to, not a Python tool), and scoring a model against the labelled set.
 
 Phase 1 deliberately runs against **one class in one language**. The agent layer is the
 only nondeterministic component in the system; introducing it against a substrate whose

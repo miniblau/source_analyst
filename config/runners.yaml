@@ -1,0 +1,42 @@
+# Agent runners (design §7) — the seam between the deterministic layer and a model.
+#
+# THIS FILE IS THE ONLY PLACE A PROVIDER OR MODEL NAME MAY APPEAR. `run_agent`
+# knows how to spawn a process and how to read JSONL back; it knows nothing about
+# any vendor, and no code under source_analyst/ names one. That is what keeps the
+# §7 model-agnostic claim true rather than aspirational — swapping the model here
+# changes no code and no test.
+#
+# Contract a runner MUST satisfy:
+#   stdin   the agent prompt (agents/<agent>.md) followed by the briefing JSONL
+#   stdout  one JSON object per line, and nothing else that matters
+#   exit 0  on success
+# Anything on stdout that is not a JSON object is discarded and counted; the
+# count is reported, because a model that mostly emitted prose is a fact about
+# that model worth seeing rather than silently cleaning up.
+#
+# Placeholders in `cmd`: {agent} {model} {prompt} {repo}
+
+default: stub
+
+runners:
+  # Deterministic, no model. Replays a recorded transcript so the whole chain is
+  # testable with zero model calls (CLAUDE.md: determinism first).
+  stub:
+    cmd: ["python3", "{repo}/tests/stub_runner.py", "{agent}"]
+    timeout: 60
+
+  # Local models at the desk. `ollama run <model>` takes the prompt on stdin.
+  ollama:
+    cmd: ["ollama", "run", "{model}"]
+    model: qwen2.5-coder:14b
+    timeout: 900
+
+  # Intended runner (§7). Flags depend on your opencode version and agent config;
+  # this is a starting point to adjust, not a verified invocation.
+  opencode:
+    cmd: ["opencode", "run", "--agent", "{agent}"]
+    timeout: 900
+
+# Per-agent overrides. Judgement and prose are different jobs and may deserve
+# different models; that decision is data, made here.
+agents: {}
