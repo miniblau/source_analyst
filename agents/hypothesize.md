@@ -27,7 +27,7 @@ One JSON object per line on stdout, nothing else:
 ```json
 {"statement": "...", "vuln_class": "<the briefing's `class` field, verbatim>", "status": "needs_proof",
  "confidence": 0.7, "evidence": ["f_...", "f_..."], "case": "file:line",
- "reasoning": "...", "seed": "<seed hypothesis this matches, or omit>"}
+ "reasoning": "...", "seed": "<seed hypothesis this matches, or \"\">"}
 ```
 
 - `evidence` — copy the case's fact ids. `admit` rejects any id not in the log, so

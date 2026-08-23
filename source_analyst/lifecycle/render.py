@@ -51,12 +51,18 @@ def main(argv: list[str] | None = None) -> int:
         w(f"## {i}. {f.get('title')}\n\n")
         w(f"**Severity** {f.get('severity')} · **Tier** {f.get('tier')} · "
           f"**Confidence** {h.get('confidence', '?')} · `{f['id']}`\n\n")
-        w(f"{f.get('impact','')}\n\n")
+        if str(f.get("impact", "")).strip():
+            w(f"{f['impact'].strip()}\n\n")
         if h.get("reasoning"):
             w(f"**Why this was flagged.** {h['reasoning']}\n\n")
         w("**Recreation**\n\n```\n" + f.get("recreation", "") + "\n```\n\n")
         w("**References**\n\n" + "".join(f"- `{r}`\n" for r in f.get("refs", [])) + "\n")
-        w(f"**Caveats.** {f.get('caveats','')}\n\n")
+        # Never render a bare heading: an empty caveats section reads as "nothing to
+        # caveat", which is the opposite of true for a static-only finding.
+        caveats = str(f.get("caveats", "")).strip()
+        w(f"**Caveats.** {caveats}\n\n" if caveats else
+          "**Caveats.** _None recorded — this finding predates the caveats"
+          " requirement; read the tier limits above._\n\n")
         # Provenance is part of the finding, not a footnote: every claim above
         # traces to substrate facts by id.
         w(f"<sub>Evidence: {', '.join(h.get('evidence', []))} · "

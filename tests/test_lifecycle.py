@@ -94,14 +94,26 @@ class TestAdmitGate(unittest.TestCase):
     def test_finding_may_not_exceed_the_class_ceiling(self):
         hid = json.loads(self.run_admit(self.hyp()).stdout)["id"]
         f = {"hypothesis": hid, "tier": "dynamic_poc", "severity": "high",
-             "recreation": "r", "refs": ["A.java:20"], "title": "t"}
+             "recreation": "r", "refs": ["A.java:20"], "title": "t", "caveats": "c"}
         r = self.run_admit(f, kind="finding")
         self.assertNotEqual(r.returncode, 0)
         self.assertIn("above the class ceiling", r.stderr)
 
+    def test_finding_without_caveats_rejected(self):
+        """A static-only finding that does not say where it stops is the
+        overclaiming this system exists to prevent. Asking in the prompt was not
+        enough — the first real run produced 23 findings with none, because the
+        output schema forbade the field the prompt demanded."""
+        hid = json.loads(self.run_admit(self.hyp()).stdout)["id"]
+        bad = {"hypothesis": hid, "tier": "static_pattern", "severity": "low",
+               "recreation": "r", "refs": ["A.java:20"], "title": "t"}
+        r = self.run_admit(bad, kind="finding")
+        self.assertNotEqual(r.returncode, 0)
+        self.assertIn("caveats", r.stderr)
+
     def test_finding_must_point_at_a_real_hypothesis(self):
         f = {"hypothesis": "h_nope", "tier": "static_reachability", "severity": "high",
-             "recreation": "r", "refs": ["A.java:20"], "title": "t"}
+             "recreation": "r", "refs": ["A.java:20"], "title": "t", "caveats": "c"}
         self.assertNotEqual(self.run_admit(f, kind="finding").returncode, 0)
 
     def test_class_mismatch_rejected(self):

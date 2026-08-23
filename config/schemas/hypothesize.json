@@ -18,7 +18,8 @@
           "confidence",
           "evidence",
           "case",
-          "reasoning"
+          "reasoning",
+          "seed"
         ],
         "properties": {
           "statement": {
@@ -58,6 +59,11 @@
           "reasoning": {
             "type": "string",
             "maxLength": 1200
+          },
+          "seed": {
+            "type": "string",
+            "maxLength": 200,
+            "description": "seed hypothesis matched, or empty"
           }
         }
       },

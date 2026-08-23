@@ -165,6 +165,12 @@ The substrate spine. Get this right and most of the system follows.
   site the *substrate* never offered (a substrate gap, not a model miss), and a hypothesis
   about an *unlabelled* site (unscored, not correct). Grade on evidence facts, never on
   the `case` string the agent wrote about itself.
+- **A prompt and a grammar that disagree fail silently.** Constrained decoding cannot
+  emit a field the schema does not declare, so an instruction to produce one is
+  unobeyable and *nothing errors*. Anything the agent prompt asks for must exist in
+  `config/schemas/<agent>.json`, and a test parses the prompt's JSON example to enforce
+  it. What the report must not omit belongs in `admit`'s required fields too: prompts
+  request, the gate enforces.
 - **A metric that cannot fail is decoration.** `score`'s `calibration` asks whether an
   agent's confidence tracks the evidence, and `agrees: false` must be reachable. It also
   keeps three nothings apart: constant confidence (the model expressed no opinion), a

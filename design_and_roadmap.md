@@ -84,6 +84,18 @@ was written to refuse. All three are fixed and pinned by tests. The lesson is th
 architecture is built on: a partial result that validates is more dangerous than a loud
 failure, so every filter must say what it removed.
 
+**And what the report leg caught — 2026-08-23.** 23 findings, all correctly capped at
+`static_reachability`, 713 lines of markdown with recreation flows. Every one of them was
+missing `caveats`, the field that states what the tier does *not* establish — because
+`config/schemas/report.json` set `additionalProperties: false` and never declared the
+field the agent prompt demanded. Constrained decoding made an instruction impossible to
+obey, and nothing failed: `render` printed a bare `**Caveats.**` heading and moved on.
+`caveats` is now in the schema, required by `admit`, and a test parses the JSON example
+out of every agent prompt and asserts the schema permits every field it names. (That test
+immediately found a second instance: `seed` in `agents/hypothesize.md`.) The general
+lesson: **a prompt and a grammar that disagree fail silently**, so the agreement has to be
+checked mechanically rather than by reading both.
+
 **Known limit, load-bearing.** `reachableByFlows` enumerates *representative* paths, not
 all routes (proven on WebGoat Lesson8: the clean 61→62 route is never returned). No tool
 may therefore claim a flow is sanitized, and none does — `sanitizer_on_path` reports

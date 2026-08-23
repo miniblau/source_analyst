@@ -49,6 +49,7 @@ def main() -> int:
                 "case": f"{snk['file']}:{snk['line']}",
                 "reasoning": "Stub runner: reported verbatim from the case evidence, "
                              "with no judgement applied.",
+                "seed": "",
             })
     else:
         for row in [r for r in rows if r.get("kind") == "hypothesis"]:
@@ -64,6 +65,9 @@ def main() -> int:
                 "severity": "medium",
                 "refs": refs or ["unknown:0"],
                 "recreation": "Stub runner: no recreation flow was reasoned about.",
+                "impact": "",
+                "caveats": "Stub runner: no caveats were reasoned about; this is the "
+                           "null baseline, not an assessment.",
             })
 
     print(f"Here are the {len(out)} records:")   # prose `run_agent` must discard

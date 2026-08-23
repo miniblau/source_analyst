@@ -30,7 +30,12 @@ from ..cpg.workspace import repo_root
 from ..manifest.loader import ManifestError, load_class, load_patterns, tier_table
 
 HYPOTHESIS_FIELDS = ("statement", "vuln_class", "status", "confidence", "evidence")
-FINDING_FIELDS = ("hypothesis", "tier", "severity", "recreation", "refs", "title")
+# `caveats` is required, not optional prose. A static-only finding that does not say
+# where it stops is the overclaiming this whole system exists to prevent, and asking
+# for it in the agent prompt was not enough: the first real run produced 23 findings
+# with no caveats at all, because the output schema forbade the field the prompt
+# demanded. Prompts request; the gate enforces.
+FINDING_FIELDS = ("hypothesis", "tier", "severity", "recreation", "refs", "title", "caveats")
 SEVERITIES = ("info", "low", "medium", "high", "critical")
 
 

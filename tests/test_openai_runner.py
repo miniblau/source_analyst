@@ -8,6 +8,7 @@ because then a scorecard would be measuring a different setup than you think.
 
 import json
 import os
+import re
 import subprocess
 import sys
 import threading
@@ -203,6 +204,24 @@ class TestSchemasMatchTheGate(unittest.TestCase):
         for tier in offered:
             self.assertLessEqual(tiers[tier]["ordinal"], tiers["static_trace"]["ordinal"],
                                  f"{tier} needs a dynamic run")
+
+    def test_prompt_asks_for_nothing_the_schema_forbids(self):
+        """The bug this exists to catch, found on the first real report run: the
+        prompt demanded `caveats`, `additionalProperties: false` forbade it, and 23
+        findings came back without the one field that keeps a static-only report
+        honest. No error anywhere — just a blank heading in the rendered markdown.
+        A prompt and a grammar that disagree fail silently, so check mechanically.
+        """
+        for agent in ("hypothesize", "report"):
+            text = (ROOT / "agents" / f"{agent}.md").read_text()
+            block = re.search(r"```json\n(.*?)```", text, re.S)
+            self.assertIsNotNone(block, f"{agent}.md has no JSON example to check")
+            example = json.loads(block.group(1))
+            allowed = set(self.load(agent)["properties"])
+            self.assertTrue(
+                set(example) <= allowed,
+                f"{agent}.md asks for {sorted(set(example) - allowed)}, which the "
+                f"schema does not permit — the model cannot emit it")
 
     def test_free_text_fields_are_bounded(self):
         """An unbounded string in a constrained grammar is how a model runs away:

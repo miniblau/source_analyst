@@ -17,7 +17,9 @@
           "tier",
           "severity",
           "recreation",
-          "refs"
+          "refs",
+          "impact",
+          "caveats"
         ],
         "properties": {
           "hypothesis": {
@@ -58,6 +60,14 @@
             },
             "minItems": 1,
             "maxItems": 32
+          },
+          "impact": {
+            "type": "string",
+            "maxLength": 1000
+          },
+          "caveats": {
+            "type": "string",
+            "maxLength": 1000
           }
         }
       },
