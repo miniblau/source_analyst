@@ -165,6 +165,11 @@ The substrate spine. Get this right and most of the system follows.
   site the *substrate* never offered (a substrate gap, not a model miss), and a hypothesis
   about an *unlabelled* site (unscored, not correct). Grade on evidence facts, never on
   the `case` string the agent wrote about itself.
+- **A metric that cannot fail is decoration.** `score`'s `calibration` asks whether an
+  agent's confidence tracks the evidence, and `agrees: false` must be reachable. It also
+  keeps three nothings apart: constant confidence (the model expressed no opinion), a
+  signal absent from the evidence (a substrate gap), and a signal present but never
+  varying. Collapsing any of them into `0.0` reads as a measurement that was never made.
 - **Keep the null baseline runnable.** `tests/stub_runner.py` judges nothing and scores
   0.885 precision with 0.0 confidence separation. A model that cannot beat it has added
   nothing, and that is only visible because the floor is a thing you can execute.

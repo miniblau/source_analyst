@@ -155,6 +155,128 @@ class TestConfidenceSeparation(unittest.TestCase):
         self.assertIsNone(card["confidence"]["separation"])
 
 
+def check(file: str, line: int, source: str = "q", candidates: int = 0) -> dict:
+    """A sanitizer_check fact — carries the signal calibration correlates against."""
+    return records.fact(
+        {"kind": "sanitizer_check", "source_name": source, "source_file": file,
+         "source_line": 1, "sink_file": file, "sink_line": line, "sink_name": "s",
+         "reported_paths": 1, "reported_paths_without_sanitizer": 0,
+         "candidate_count": candidates, "candidate_sanitizers": []},
+        "cpg:sanitizer_on_path")
+
+
+class TestSpearman(unittest.TestCase):
+    def test_perfect_inverse_is_minus_one(self):
+        self.assertEqual(sc.spearman([1, 2, 3, 4], [4, 3, 2, 1]), -1.0)
+
+    def test_perfect_agreement_is_plus_one(self):
+        self.assertEqual(sc.spearman([1, 2, 3, 4], [10, 20, 30, 40]), 1.0)
+
+    def test_ties_do_not_invent_an_ordering(self):
+        self.assertEqual(sc.spearman([1, 1, 1, 1], [1, 2, 3, 4]), None)
+
+    def test_too_few_points_is_none(self):
+        self.assertIsNone(sc.spearman([1, 2], [2, 1]))
+
+    def test_monotone_but_not_linear_still_scores_one(self):
+        """Rank correlation, not Pearson: the agent is being asked to order cases,
+        not to place them on a line."""
+        self.assertEqual(sc.spearman([1, 2, 3, 4], [1, 10, 1000, 100000]), 1.0)
+
+
+class TestCalibration(unittest.TestCase):
+    """Does confidence carry information? Stays defined when no noise was kept,
+    which is precisely where `separation` gives up."""
+
+    def kept(self, pairs):
+        """pairs: (confidence, sanitizer candidate count)"""
+        rows, facts = [], {}
+        for i, (conf, cands) in enumerate(pairs):
+            f, c = flow("A.java", 20 + i), check("A.java", 20 + i, candidates=cands)
+            facts[f["id"]] = f
+            facts[c["id"]] = c
+            rows.append({"confidence": conf, "evidence": [f["id"], c["id"]]})
+        return rows, facts
+
+    def test_flat_confidence_is_named_not_left_blank(self):
+        """The null baseline. 'The model said the same thing every time' is a result
+        about the model, not a gap in the measurement."""
+        rows, facts = self.kept([(0.5, 0), (0.5, 1), (0.5, 2), (0.5, 3)])
+        out = sc.calibrate(rows, facts)
+        self.assertEqual(out["spread"], 0.0)
+        self.assertEqual(out["stdev"], 0.0)
+        self.assertEqual(out["signals"], {})
+        self.assertIn("constant", out["note"])
+
+    def test_confidence_falling_with_sanitizers_agrees(self):
+        rows, facts = self.kept([(0.9, 0), (0.8, 1), (0.7, 2), (0.6, 3)])
+        sig = sc.calibrate(rows, facts)["signals"]["sanitizer_candidates"]
+        self.assertEqual(sig["rho"], -1.0)
+        self.assertTrue(sig["agrees"])
+
+    def test_confidence_rising_with_sanitizers_disagrees(self):
+        """The metric has to be able to fail, or it is decoration."""
+        rows, facts = self.kept([(0.6, 0), (0.7, 1), (0.8, 2), (0.9, 3)])
+        sig = sc.calibrate(rows, facts)["signals"]["sanitizer_candidates"]
+        self.assertEqual(sig["rho"], 1.0)
+        self.assertFalse(sig["agrees"])
+
+    def test_constant_signal_is_distinguished_from_absent_signal(self):
+        """Conflating them would hide a substrate gap behind a model result."""
+        rows, facts = self.kept([(0.9, 2), (0.8, 2), (0.7, 2), (0.6, 2)])
+        sigs = sc.calibrate(rows, facts)["signals"]
+        self.assertIsNone(sigs["sanitizer_candidates"]["rho"])
+        self.assertIn("constant", sigs["sanitizer_candidates"]["reason"])
+        self.assertIn("absent", sigs["arg_is_literal"]["reason"])
+
+    def test_calibration_reads_the_kept_set_only(self):
+        f = flow("A.java", 20)
+        card, _, _ = sc.score([f, hyp(f["id"], "refuted", 0.9)], truth(), "sqli", None)
+        self.assertEqual(card["calibration"]["n"], 0)
+        self.assertIn("no kept hypotheses", card["calibration"]["note"])
+
+    def test_it_survives_a_model_that_kept_no_noise(self):
+        """The whole point: `separation` is null on a perfect run, this is not."""
+        rows, facts = self.kept([(0.9, 0), (0.8, 1), (0.7, 2)])
+        out = sc.calibrate(rows, facts)
+        self.assertIsNotNone(out["signals"]["sanitizer_candidates"]["rho"])
+
+
+class TestCalibrationConfig(unittest.TestCase):
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(self.tmp.cleanup)
+        self.addCleanup(lambda: os.environ.pop("SOURCE_ANALYST_CONFIG", None))
+
+    def write(self, doc):
+        d = Path(self.tmp.name)
+        (d / "calibration.yaml").write_text(yaml.safe_dump(doc))
+        os.environ["SOURCE_ANALYST_CONFIG"] = str(d)
+
+    def test_shipped_config_loads(self):
+        signals = sc.calibration_signals()
+        self.assertTrue(signals)
+        for name, spec in signals.items():
+            self.assertIn(spec["direction"], ("up", "down"))
+            self.assertTrue(str(spec.get("why", "")).strip(),
+                            f"{name} has no `why` — an unarguable direction is a guess")
+
+    def test_unknown_direction_rejected(self):
+        self.write({"signals": {"x": {"field": "f", "direction": "sideways"}}})
+        with self.assertRaises(sc.ScoreError):
+            sc.calibration_signals()
+
+    def test_signal_without_a_field_rejected(self):
+        self.write({"signals": {"x": {"direction": "up"}}})
+        with self.assertRaises(sc.ScoreError):
+            sc.calibration_signals()
+
+    def test_empty_signals_rejected(self):
+        self.write({"signals": {}})
+        with self.assertRaises(sc.ScoreError):
+            sc.calibration_signals()
+
+
 class TestOracleValidation(unittest.TestCase):
     def _write(self, doc) -> Path:
         d = Path(self.tmp.name)

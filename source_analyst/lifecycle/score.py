@@ -74,6 +74,105 @@ def load_labels(target: str, vuln_class: str) -> dict[str, Any]:
     return doc
 
 
+def calibration_signals() -> dict[str, dict[str, Any]]:
+    env = os.environ.get("SOURCE_ANALYST_CONFIG")
+    base = Path(env).expanduser().resolve() if env else repo_root() / "config"
+    doc = yaml.safe_load((base / "calibration.yaml").read_text())
+    signals = (doc or {}).get("signals")
+    if not isinstance(signals, dict) or not signals:
+        raise ScoreError("config/calibration.yaml: expected a non-empty `signals` mapping")
+    for name, spec in signals.items():
+        if spec.get("direction") not in ("up", "down"):
+            raise ScoreError(f"calibration signal {name!r}: direction must be 'up' or 'down'")
+        if not spec.get("field"):
+            raise ScoreError(f"calibration signal {name!r}: no `field`")
+    return signals
+
+
+def _ranks(values: list[float]) -> list[float]:
+    """Average ranks, so ties do not invent an ordering that is not in the data."""
+    order = sorted(range(len(values)), key=lambda i: values[i])
+    ranks = [0.0] * len(values)
+    i = 0
+    while i < len(order):
+        j = i
+        while j + 1 < len(order) and values[order[j + 1]] == values[order[i]]:
+            j += 1
+        shared = (i + j) / 2 + 1
+        for k in range(i, j + 1):
+            ranks[order[k]] = shared
+        i = j + 1
+    return ranks
+
+
+def spearman(xs: list[float], ys: list[float]) -> float | None:
+    """Rank correlation, or None when the question is not answerable.
+
+    A constant series has no ranking to correlate, and that is the single most
+    important case here: a model whose confidence never moves returns None, not 0.
+    Reporting 0 would read as "measured, no relationship" when the truth is "this
+    model expressed no opinion to measure".
+    """
+    n = len(xs)
+    if n < 3 or len(set(xs)) < 2 or len(set(ys)) < 2:
+        return None
+    rx, ry = _ranks(xs), _ranks(ys)
+    mx, my = statistics.fmean(rx), statistics.fmean(ry)
+    num = sum((a - mx) * (b - my) for a, b in zip(rx, ry))
+    den = (sum((a - mx) ** 2 for a in rx) * sum((b - my) ** 2 for b in ry)) ** 0.5
+    return round(num / den, 3) if den else None
+
+
+def _signal_value(evidence: list[str], facts: dict[str, dict], field: str) -> float | None:
+    for fid in evidence:
+        f = facts.get(fid)
+        if f is not None and field in f and f[field] is not None:
+            v = f[field]
+            return float(v) if not isinstance(v, bool) else float(int(v))
+    return None
+
+
+def calibrate(kept: list[dict], facts: dict[str, dict]) -> dict[str, Any]:
+    """Does confidence move with the evidence, and in the declared direction?
+
+    Stays defined when a model keeps no noise, which is the whole point: it reads
+    the *kept* set only and asks whether the number varies with what the agent was
+    told to weigh. A model that stamps one confidence on everything scores spread
+    0.0 and every signal unmeasurable — which is exactly what the null baseline is.
+    """
+    confs = [h["confidence"] for h in kept if isinstance(h.get("confidence"), (int, float))]
+    out: dict[str, Any] = {
+        "n": len(confs),
+        "spread": round(max(confs) - min(confs), 3) if confs else None,
+        "stdev": round(statistics.pstdev(confs), 3) if len(confs) > 1 else None,
+        "signals": {},
+    }
+    if len(confs) < 3 or len(set(confs)) < 2:
+        # Named rather than left blank: "the model said the same thing every time"
+        # is a result about the model, not a gap in the measurement.
+        out["note"] = ("confidence is constant across the kept set, so nothing can be "
+                       "correlated with it" if confs else "no kept hypotheses to calibrate")
+        return out
+
+    for name, spec in calibration_signals().items():
+        pairs = [(h["confidence"], _signal_value(h.get("evidence", []), facts, spec["field"]))
+                 for h in kept]
+        pairs = [(c, v) for c, v in pairs if v is not None]
+        rho = spearman([c for c, _ in pairs], [v for _, v in pairs])
+        agrees = None
+        if rho is not None:
+            agrees = rho < 0 if spec["direction"] == "down" else rho > 0
+        entry = {"rho": rho, "expected": spec["direction"], "agrees": agrees, "n": len(pairs)}
+        if rho is None:
+            # Two different nothings, and conflating them would hide a substrate
+            # gap behind a model result: the signal was never in the evidence, or
+            # it was there and never varied.
+            entry["reason"] = ("signal absent from the evidence facts" if not pairs
+                               else "signal is constant across the kept set")
+        out["signals"][name] = entry
+    return out
+
+
 def statuses() -> dict[str, dict[str, Any]]:
     env = os.environ.get("SOURCE_ANALYST_CONFIG")
     base = Path(env).expanduser().resolve() if env else repo_root() / "config"
@@ -122,7 +221,9 @@ def score(log: list[dict], truth: dict, vuln_class: str, src: str | None) -> dic
             continue
         rows.append({"id": h["id"], "sink": sink, "label": label, "status": h["status"],
                      "kept": bool(spec["retains_case"]),
-                     "confidence": h.get("confidence")})
+                     "confidence": h.get("confidence"),
+                     # carried so calibration can reach the evidence facts
+                     "evidence": h.get("evidence", [])})
 
     if unknown_status:
         raise ScoreError(f"hypotheses carry unknown status(es): {sorted(set(unknown_status))}")
@@ -178,6 +279,9 @@ def score(log: list[dict], truth: dict, vuln_class: str, src: str | None) -> dic
         # at least one hypothesis. A site can survive on one source and be lost on
         # another, and case recall alone hides that.
         "site_recall": rate(len(kept_sites & vuln_sites), len(vuln_sites)),
+        # Reads the kept set only, so unlike `separation` it survives a model that
+        # keeps no noise. See config/calibration.yaml.
+        "calibration": calibrate([r for r in rows if r["kept"]], facts),
         "confidence": {"mean_on_vulnerable": mean_conf(tp), "mean_on_noise": mean_conf(fp),
                        # The signal that separates a model from the null baseline:
                        # not whether it kept things, but whether its confidence

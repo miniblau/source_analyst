@@ -1,0 +1,43 @@
+# Does an agent's confidence carry information? (design §8)
+#
+# `confidence.separation` compares kept-true against kept-noise, so it is undefined
+# for a model that keeps no noise — undefined exactly at the top of its range, which
+# makes it useless for certifying a good model. This file drives the metric that
+# stays defined: rank correlation between confidence and the evidence signals the
+# agent was told to weigh.
+#
+# Data, not code, for the usual reason. `direction` is the ONLY judgement here, and
+# it is a claim about evidence strength, not about any vuln class:
+#
+#   down  more of this signal should mean a WEAKER claim
+#   up    more of this signal should mean a STRONGER claim
+#
+# `field` is read from whichever evidence fact carries it. A signal absent from a
+# run's facts is reported as unmeasured, never as agreement.
+
+signals:
+  sanitizer_candidates:
+    field: candidate_count
+    direction: down
+    why: a candidate on the path is unaudited, so the claim is less settled
+
+  path_length:
+    field: path_length
+    direction: down
+    why: a longer path is harder to read end to end and has more room for something
+         the engine did not model
+
+  methods_crossed:
+    field: crosses_methods
+    direction: down
+    why: each hop is another frontend resolution that could be wrong
+
+  sink_resolved:
+    field: resolved
+    direction: up
+    why: a resolved sink is known to be the method the manifest meant
+
+  arg_is_literal:
+    field: arg_is_literal
+    direction: down
+    why: a compile-time literal argument is not runtime-built statement text

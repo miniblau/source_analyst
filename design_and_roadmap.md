@@ -49,12 +49,28 @@ precision 1.0  recall 1.0  site_recall 1.0
 skipped_other_class []   unlabelled 0   substrate gaps []
 ```
 
-**Honest limit of the headline metric.** `confidence.separation` is `null` here, because
-the model kept no noise and there is nothing to take a mean over. The metric compares
-confidence on kept-true against confidence on kept-noise, so it is undefined exactly when
-a model is perfect and only discriminates *among imperfect* models. It remains the right
-number for ranking two mediocre models; it is not a number to wave at a good one. Do not
-read `null` as a failure, and do not read it as a pass either — read the case counts.
+**Two confidence metrics, and why there are two.** `confidence.separation` compares the
+mean confidence on kept-true against kept-noise. It is `null` on this run because the
+model kept no noise — undefined exactly when a model is perfect, so it can rank two
+mediocre models and cannot certify a good one. Do not read `null` there as a failure, and
+do not read it as a pass either.
+
+`calibration` is the one that stays defined: it reads the **kept set only** and asks
+whether confidence moves with the evidence signals the agent was told to weigh, by rank
+correlation. Signals and their expected direction live in `config/calibration.yaml` —
+data, like everything else, and `direction` is the only judgement in the file. Measured:
+
+```
+              spread   sanitizer_candidates   path_length   methods_crossed
+stub            0.00   (confidence constant — nothing to correlate)
+Qwen3-Coder     0.35   rho -0.747  agrees     -0.719 agrees  -0.817 agrees
+```
+
+Three distinctions it refuses to blur: a **constant confidence** returns `null` with a
+note rather than `0.0`, because "the model expressed no opinion" is not "measured, no
+relationship"; a signal **absent from the evidence** is reported separately from a signal
+**present but constant**, since the first is a substrate gap wearing a model result's
+clothes; and `agrees: false` is reachable — a metric that cannot fail is decoration.
 
 **What that pass caught in our own code — 2026-08-23.** It scored 22 of 26 and looked
 flawless. Four judgements carried `vuln_class: "SQL injection"` — the class's human
