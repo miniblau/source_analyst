@@ -33,11 +33,28 @@ the other half: 16 labelled WebGoat sites, and the null-baseline stub measurably
 a real model (precision 0.885 vs 1.0, confidence separation 0.0).
 
 **First local-model pass — 2026-08-23.** Qwen3-Coder-30B-A3B Q5_K_XL on the laptop,
-7 batches of 4, 23.8 min, zero malformed records. Judgement was **26 for 26**, including
-every discriminator the oracle was built around: `Assignment5:44` kept at 0.9 despite the
-sink being named `prepareStatement`, `Servers:50` (ORDER BY under `mitigation/`), the
-second-order `log()` helper, and all three ProfileUpload name collisions refuted at 1.0.
-So the substrate-plus-manifest briefing is enough for a 30B local model to do this job.
+7 batches of 4, zero malformed records across the run. Judgement was **26 for 26**,
+including every discriminator the oracle was built around: `Assignment5:44` kept at 0.9
+despite the sink being named `prepareStatement`, `Servers:50` (ORDER BY under
+`mitigation/`), the second-order `log()` helper, and all three ProfileUpload name
+collisions refuted at 1.0. So the substrate-plus-manifest briefing is enough for a 30B
+local model to do this job — no source access, no retrieval, and no knowledge of the
+class beyond the manifest `narrative`.
+
+Final scorecard after the fixes below, 19.3 min (23.8 before the briefing trim):
+
+```
+scored 26/26   TP 23  TN 3  FP 0  FN 0
+precision 1.0  recall 1.0  site_recall 1.0
+skipped_other_class []   unlabelled 0   substrate gaps []
+```
+
+**Honest limit of the headline metric.** `confidence.separation` is `null` here, because
+the model kept no noise and there is nothing to take a mean over. The metric compares
+confidence on kept-true against confidence on kept-noise, so it is undefined exactly when
+a model is perfect and only discriminates *among imperfect* models. It remains the right
+number for ranking two mediocre models; it is not a number to wave at a good one. Do not
+read `null` as a failure, and do not read it as a pass either — read the case counts.
 
 **What that pass caught in our own code — 2026-08-23.** It scored 22 of 26 and looked
 flawless. Four judgements carried `vuln_class: "SQL injection"` — the class's human
