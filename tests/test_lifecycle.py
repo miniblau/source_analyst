@@ -104,6 +104,16 @@ class TestAdmitGate(unittest.TestCase):
              "recreation": "r", "refs": ["A.java:20"], "title": "t"}
         self.assertNotEqual(self.run_admit(f, kind="finding").returncode, 0)
 
+    def test_class_mismatch_rejected(self):
+        """Observed on the first local-model run: the model wrote the class's human
+        title where its identifier belongs. Every judgement was right and four of
+        them still fell out of every query keyed on class — a silent partial result,
+        which is worse than a loud failure."""
+        r = self.run_admit(self.hyp(vuln_class="SQL injection"))
+        self.assertNotEqual(r.returncode, 0)
+        self.assertIn("vuln_class", r.stderr)
+        self.assertIn("verbatim", r.stderr)
+
     def test_batch_is_all_or_nothing(self):
         good, bad = self.hyp(), self.hyp(evidence=["f_" + "1" * 24])
         r = subprocess.run(
@@ -164,6 +174,58 @@ class TestBrief(unittest.TestCase):
         rows = self.brief("--agent", "hypothesize")
         self.assertEqual(rows[0]["cases"], 0)
         self.assertEqual([r for r in rows if r.get("kind") == "case"], [])
+
+
+class TestStepSlimming(unittest.TestCase):
+    """Path steps are 67% of the briefing and most of that is repetition."""
+
+    def test_carried_fields_are_dropped_only_when_unchanged(self):
+        from source_analyst.lifecycle.brief import _slim_steps
+        steps = [
+            {"label": "PARAM", "file": "A.java", "method": "m1", "line": 1, "code": "a"},
+            {"label": "CALL", "file": "A.java", "method": "m1", "line": 2, "code": "b"},
+            {"label": "CALL", "file": "B.java", "method": "m2", "line": 3, "code": "c"},
+            {"label": "CALL", "file": "B.java", "method": "m3", "line": 4, "code": "d"},
+        ]
+        got = _slim_steps(steps)
+        self.assertEqual(got[0], steps[0], "the first step states everything")
+        self.assertEqual(got[1], {"label": "CALL", "line": 2, "code": "b"})
+        self.assertEqual(got[2], steps[2], "a change must be restated")
+        self.assertEqual(got[3], {"label": "CALL", "method": "m3", "line": 4, "code": "d"},
+                         "file unchanged, method changed")
+
+    def test_slimming_is_lossless(self):
+        """Carrying the last stated value forward must rebuild the original exactly
+        — a briefing that quietly lost a hop would be worse than a slow one."""
+        from source_analyst.lifecycle.brief import _slim_steps, CARRIED_STEP_FIELDS
+        steps = [
+            {"file": "A.java", "method": "m1", "line": 1},
+            {"file": "A.java", "method": "m1", "line": 2},
+            {"file": "B.java", "method": "m1", "line": 3},
+            {"file": "B.java", "method": "m2", "line": 4},
+            {"file": "B.java", "method": "m2", "line": 5},
+        ]
+        carried, rebuilt = {}, []
+        for slim in _slim_steps(steps):
+            for k in CARRIED_STEP_FIELDS:
+                if k in slim:
+                    carried[k] = slim[k]
+            rebuilt.append({**slim, **{k: v for k, v in carried.items()}})
+        self.assertEqual(rebuilt, steps)
+
+    def test_header_announces_the_convention(self):
+        """The reader is told once, not on every step — which is the whole saving."""
+        tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(tmp.cleanup)
+        log = Path(tmp.name) / "log.jsonl"
+        store.append([flow_fact()], log)
+        r = subprocess.run(
+            [sys.executable, "-m", "source_analyst.lifecycle.brief", "--class", "sqli",
+             "--lang", "java", "--agent", "hypothesize"],
+            cwd=ROOT, env=dict(os.environ, SOURCE_ANALYST_LOG=str(log)),
+            capture_output=True, text=True)
+        header = json.loads(r.stdout.splitlines()[0])
+        self.assertEqual(header["step_fields_carry_forward"], ["file", "method"])
 
 
 class TestChunking(unittest.TestCase):

@@ -30,6 +30,19 @@ import urllib.error
 import urllib.request
 
 
+def _dump(text: str) -> None:
+    """Put the model's raw output where the transcript will catch it.
+
+    Learned the hard way: on a failure the shim printed only a diagnosis and threw
+    the text away, so `run_agent` recorded an empty stdout and the one artifact that
+    would have explained the run did not exist. Provenance is worth least when
+    everything worked.
+    """
+    print("openai_chat: raw output follows ---8<---", file=sys.stderr)
+    print(text, file=sys.stderr)
+    print("---8<--- end raw output", file=sys.stderr)
+
+
 def main() -> int:
     p = argparse.ArgumentParser(prog="openai_chat")
     p.add_argument("--schema", help="JSON schema file to constrain the response")
@@ -86,15 +99,27 @@ def main() -> int:
         return 2
 
     try:
-        text = doc["choices"][0]["message"]["content"]
+        choice = doc["choices"][0]
+        text = choice["message"]["content"]
     except (KeyError, IndexError, TypeError):
         print(f"openai_chat: unexpected response shape: {json.dumps(doc)[:800]}", file=sys.stderr)
         return 2
 
     usage = doc.get("usage") or {}
+    finish = choice.get("finish_reason")
     print(json.dumps({"cmd": "openai_chat", "base_url": base, "model": body["model"],
-                      "schema": bool(schema), "usage": usage}, separators=(",", ":")),
-          file=sys.stderr)
+                      "schema": bool(schema), "finish_reason": finish, "usage": usage},
+                     separators=(",", ":")), file=sys.stderr)
+
+    if finish == "length":
+        # Diagnose this HERE. Truncated JSON reaches the parser below as a syntax
+        # error, and "did not parse" sends you looking at the model's formatting
+        # when the real answer is that it was cut off mid-sentence.
+        print(f"openai_chat: the model hit max_tokens "
+              f"({body['max_tokens']}) and its output is truncated — raise "
+              f"LLM_MAX_TOKENS, or shrink the batch (`brief --chunk-size`)", file=sys.stderr)
+        _dump(text)
+        return 2
 
     if schema:
         # Constrained mode returns one document; the pipeline speaks JSONL.
@@ -102,10 +127,12 @@ def main() -> int:
             parsed = json.loads(text)
         except ValueError as e:
             print(f"openai_chat: constrained output did not parse as JSON ({e})", file=sys.stderr)
+            _dump(text)
             return 2
         records = parsed.get("records") if isinstance(parsed, dict) else parsed
         if not isinstance(records, list):
             print("openai_chat: schema output has no `records` list", file=sys.stderr)
+            _dump(text)
             return 2
         for rec in records:
             print(json.dumps(rec, ensure_ascii=False, separators=(",", ":")))

@@ -29,10 +29,27 @@ decisions latest-wins by log position.
 findings rendered with recreation flows. `run_agent` now closes the loop: the model is
 reached through a command named in `config/runners.yaml`, so the whole chain runs
 unattended and — with the stub runner — under test with zero model calls. `score` closes
-the other half: 16 labelled WebGoat sites, and the null-baseline stub already measurably
-loses to the real run (precision 0.885 vs 1.0, confidence separation 0.0). Briefings chunk
-(~9k tokens a batch) and the generic OpenAI-compatible runner is wired. **Next action** =
-start a model server, run `tools/pass.sh`, read the scorecard.
+the other half: 16 labelled WebGoat sites, and the null-baseline stub measurably loses to
+a real model (precision 0.885 vs 1.0, confidence separation 0.0).
+
+**First local-model pass — 2026-08-23.** Qwen3-Coder-30B-A3B Q5_K_XL on the laptop,
+7 batches of 4, 23.8 min, zero malformed records. Judgement was **26 for 26**, including
+every discriminator the oracle was built around: `Assignment5:44` kept at 0.9 despite the
+sink being named `prepareStatement`, `Servers:50` (ORDER BY under `mitigation/`), the
+second-order `log()` helper, and all three ProfileUpload name collisions refuted at 1.0.
+So the substrate-plus-manifest briefing is enough for a 30B local model to do this job.
+
+**What that pass caught in our own code — 2026-08-23.** It scored 22 of 26 and looked
+flawless. Four judgements carried `vuln_class: "SQL injection"` — the class's human
+*title* where its identifier belongs — and three separate layers let it through:
+`admit` never checked the record agreed with the `--class` it was admitted under, so
+correct judgements entered the log filed under a class that does not exist and vanished
+from every query keyed on class; `score` filtered them out in silence; and because
+`score` derived *reached-ness* from scored rows rather than from facts, it then reported
+two sites as substrate gaps — blaming the tool for a data defect, the exact conflation it
+was written to refuse. All three are fixed and pinned by tests. The lesson is the one the
+architecture is built on: a partial result that validates is more dangerous than a loud
+failure, so every filter must say what it removed.
 
 **Known limit, load-bearing.** `reachableByFlows` enumerates *representative* paths, not
 all routes (proven on WebGoat Lesson8: the clean 61→62 route is never returned). No tool
@@ -411,6 +428,14 @@ orchestrator  (primary — "understands me")
 
 `orchestrator` is the assistant you talk to. Only `trace` iterates. All of them
 reach the substrate through the same JSONL tool contract (MCP or shell wrappers).
+
+**`agents/orchestrator.md` — written 2026-08-23.** Unlike the others it is a *driver*,
+not a producer: it runs CLIs and emits no records, so it has no `config/schemas/` entry
+and never passes through `admit`. Its prompt is mostly about the four ways a zero result
+can arise (§10.5) and the duty to say which one applies, because "no findings" without
+that sentence is the most expensive thing an orchestrator can output. It also has to
+report `detect`'s coverage gaps *up front* — an operator must never infer an unrealized
+language from a suspiciously short report at the end.
 
 **Model-agnostic by construction — decided 2026-08-21.** No provider, model name,
 API key or SDK appears anywhere in `source_analyst/`; an agent is a markdown prompt

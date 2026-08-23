@@ -16,18 +16,26 @@ JSONL on stdin from `brief --agent hypothesize`:
 - `case` lines — one per (source, sink) pair, each with `evidence` (fact ids),
   `source`, `sink`, `path`, `sanitizers`.
 
+The fields named in the header's `step_fields_carry_forward` are omitted from a path
+step when they are unchanged from the step before it. A step with no `file` is in the
+same file as the previous step; the same goes for `method`. Nothing is missing.
+
 ## Output
 
 One JSON object per line on stdout, nothing else:
 
 ```json
-{"statement": "...", "vuln_class": "<from the briefing>", "status": "needs_proof",
+{"statement": "...", "vuln_class": "<the briefing's `class` field, verbatim>", "status": "needs_proof",
  "confidence": 0.7, "evidence": ["f_...", "f_..."], "case": "file:line",
  "reasoning": "...", "seed": "<seed hypothesis this matches, or omit>"}
 ```
 
 - `evidence` — copy the case's fact ids. `admit` rejects any id not in the log, so
   never invent one.
+- `vuln_class` — the briefing's `class` value character for character. It is an
+  identifier, not a name: `title` is the human-readable one and does not go here.
+  `admit` rejects a mismatch, because a judgement filed under a class that does not
+  exist vanishes from every later query without failing anything.
 - `status` — `needs_proof` when the evidence supports it; `refuted` when the
   evidence contradicts it; `inconclusive` when the substrate cannot settle it.
   `confirmed` is impossible in a static run and will be rejected.

@@ -109,6 +109,30 @@ class TestConflationsRefused(unittest.TestCase):
         self.assertEqual(card["site_recall"], 1.0)
 
 
+class TestMislabelledJudgementsAreVisible(unittest.TestCase):
+    """The regression that made a 26-case run score 22 and look flawless."""
+
+    def test_other_class_is_counted_and_named(self):
+        f = flow("A.java", 20)
+        wrong = hyp(f["id"], "needs_proof")
+        wrong["vuln_class"] = "SQL injection"
+        card, _, _ = sc.score([f, wrong], truth(), "sqli", None)
+        self.assertEqual(card["scored"], 0)
+        self.assertEqual(card["skipped_other_class"], ["SQL injection"],
+                         "a filtered-out judgement must never be invisible")
+
+    def test_a_reached_site_is_not_blamed_on_the_substrate(self):
+        """The site has a fact, so the substrate found it. Deriving reached-ness
+        from scored rows made a data defect read as a substrate gap."""
+        f = flow("A.java", 20)
+        wrong = hyp(f["id"], "needs_proof")
+        wrong["vuln_class"] = "SQL injection"
+        card, _, _ = sc.score([f, wrong], truth(), "sqli", None)
+        self.assertNotIn("A.java:20", card["sites_never_reached_by_substrate"])
+        self.assertIn("C.java:40", card["sites_never_reached_by_substrate"],
+                      "a site with no fact at all is still a substrate gap")
+
+
 class TestConfidenceSeparation(unittest.TestCase):
     """The metric that distinguishes a model from a rubber stamp."""
 

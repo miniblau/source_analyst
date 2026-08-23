@@ -101,9 +101,13 @@ def site_of(rec: dict, facts: dict[str, dict]) -> str | None:
 def score(log: list[dict], truth: dict, vuln_class: str, src: str | None) -> dict[str, Any]:
     vocab = statuses()
     facts = {r["id"]: r for r in log if r.get("type") == "fact"}
-    hyps = [r for r in log if r.get("type") == "hypothesis"
-            and r.get("vuln_class") == vuln_class
+    mine = [r for r in log if r.get("type") == "hypothesis"
             and (src is None or r.get("src") == src)]
+    hyps = [r for r in mine if r.get("vuln_class") == vuln_class]
+    # Counted and named, never dropped in silence. A run where four judgements
+    # carried a mistyped class scored 22/26 and looked flawless; the four missing
+    # ones were invisible because this filter said nothing about what it removed.
+    other_class = sorted({r.get("vuln_class") for r in mine} - {vuln_class})
 
     rows, unlabelled, unknown_status = [], [], []
     for h in hyps:
@@ -131,10 +135,19 @@ def score(log: list[dict], truth: dict, vuln_class: str, src: str | None) -> dic
     tn = [r for r in other if not r["kept"]]
 
     seen_sinks = {r["sink"] for r in rows}
-    # A labelled site with no hypothesis at all was never put in front of the agent.
-    # Charging that to the model would hide a substrate regression behind a score.
-    unreached = sorted(s for s, spec in truth["by_sink"].items() if s not in seen_sinks)
-    # Denominated over vulnerable sites the substrate ACTUALLY REACHED. Using every
+    # Reached-ness is a property of the FACTS, not of which hypotheses happened to
+    # be scored. Deriving it from scored rows made a mislabelled judgement look like
+    # a substrate that never found the site — blaming the tool for a data defect is
+    # exactly the conflation this scorer exists to refuse.
+    reached = set()
+    for f in facts.values():
+        file, line = f.get("sink_file"), f.get("sink_line")
+        if file is None:
+            file, line = f.get("file"), f.get("line")
+        if file is not None and line is not None:
+            reached.add(f"{file}:{line}")
+    unreached = sorted(s for s in truth["by_sink"] if s not in reached)
+    # Denominated over vulnerable sites the agent was actually offered. Using every
     # labelled site would fold substrate gaps back into the model's recall — the
     # exact conflation this tool exists to refuse, and a bug this file has had.
     vuln_sites = {s for s in seen_sinks
@@ -156,6 +169,7 @@ def score(log: list[dict], truth: dict, vuln_class: str, src: str | None) -> dic
         "kind": "scorecard", "class": vuln_class, "target": truth["target"],
         "commit": truth.get("commit"), "src": src,
         "scored": len(rows), "unlabelled": len(unlabelled),
+        "skipped_other_class": other_class,
         "cases": {"true_positive": len(tp), "false_negative": len(fn),
                   "false_positive": len(fp), "true_negative": len(tn)},
         "precision": rate(len(tp), len(tp) + len(fp)),
@@ -206,6 +220,10 @@ def main(argv: list[str] | None = None) -> int:
     if unlabelled:
         print(f"score: {len(unlabelled)} hypothesis/es are about unlabelled sites and were not "
               f"scored", file=sys.stderr)
+    if card["skipped_other_class"]:
+        print(f"score: skipped hypotheses labelled {card['skipped_other_class']} — if that is "
+              f"not another class you are also reviewing, those judgements are mislabelled and "
+              f"are missing from this scorecard", file=sys.stderr)
     if not card["scored"]:
         # Nothing was measured. A zero-row scorecard prints plausible-looking nulls,
         # and the one thing it must not do is read as a result.

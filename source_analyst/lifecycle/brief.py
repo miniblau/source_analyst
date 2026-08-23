@@ -25,6 +25,28 @@ from ..manifest.loader import ManifestError, load_class, load_patterns, tier_tab
 
 CASE_KEY = ("sink_file", "sink_line", "source_file", "source_line", "source_name")
 
+# Fields a path step repeats from the step before it. Measured on WebGoat: steps are
+# 67% of the briefing, and inside them `file` (~95 chars) and the fully-qualified
+# `method` (~150 chars) are restated on every step while the `code` that carries the
+# actual meaning tops out at 79. Consecutive steps almost always share both.
+CARRIED_STEP_FIELDS = ("file", "method")
+
+
+def _slim_steps(steps: list[dict]) -> list[dict]:
+    """Drop a step field when it is unchanged from the previous step.
+
+    Lossless — a reader carries the last stated value forward — and worth 39% of the
+    whole briefing on WebGoat. That is a third off the prefill, but the reason to do
+    it is that 44KB of repeated boilerplate is 44KB the model reads past to find the
+    three lines that matter.
+    """
+    out, prev = [], {}
+    for step in steps:
+        out.append({k: v for k, v in step.items()
+                    if not (k in CARRIED_STEP_FIELDS and prev.get(k) == v)})
+        prev = step
+    return out
+
 
 def _key(f: dict) -> tuple:
     return tuple(f.get(k) for k in CASE_KEY)
@@ -62,7 +84,8 @@ def _cases(log: list[dict]) -> list[dict]:
             },
             "path": {
                 "length": flow.get("path_length"), "methods_crossed": flow.get("crosses_methods"),
-                "engine_paths": flow.get("path_count"), "steps": flow.get("steps", []),
+                "engine_paths": flow.get("path_count"),
+                "steps": _slim_steps(flow.get("steps", [])),
             },
             "sanitizers": {
                 "candidates": (check or {}).get("candidate_sanitizers", []),
@@ -153,6 +176,8 @@ def main(argv: list[str] | None = None) -> int:
         "tier_claim": tiers[ceiling]["claim"],
         "reachability_assessed": patterns.reachability_assessed(),
         "instructions": INSTRUCTIONS[args.agent],
+        # Stated once per briefing rather than on every step, which is the point.
+        "step_fields_carry_forward": list(CARRIED_STEP_FIELDS),
     }
 
     if args.agent == "hypothesize":

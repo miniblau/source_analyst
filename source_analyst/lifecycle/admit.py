@@ -53,8 +53,18 @@ def _require(obj: dict, fields: tuple[str, ...], what: str) -> None:
         raise AdmitError(f"{what} is missing required field(s): {', '.join(missing)}")
 
 
-def check_hypothesis(obj: dict, log_ids: dict[str, str], dynamic: bool) -> None:
+def check_hypothesis(obj: dict, log_ids: dict[str, str], dynamic: bool,
+                     vuln_class: str | None = None) -> None:
     _require(obj, HYPOTHESIS_FIELDS, "hypothesis")
+    if vuln_class is not None and obj["vuln_class"] != vuln_class:
+        # Observed on the first local-model run: the model wrote the class's human
+        # TITLE ("SQL injection") where the briefing's `class` identifier belongs.
+        # Every judgement was correct and four of them still fell out of every
+        # downstream query keyed on class — a silent partial result, which is worse
+        # than a loud failure. The class is not the agent's to name.
+        raise AdmitError(
+            f"hypothesis is labelled vuln_class {obj['vuln_class']!r} but is being "
+            f"admitted under {vuln_class!r} — copy the briefing's `class` verbatim")
     vocab = statuses()
     status = obj["status"]
     if status not in vocab:
@@ -138,7 +148,7 @@ def main(argv: list[str] | None = None) -> int:
     try:
         for obj in objs:
             if args.type == "hypothesis":
-                check_hypothesis(obj, log_ids, args.dynamic)
+                check_hypothesis(obj, log_ids, args.dynamic, args.vuln_class)
             else:
                 check_finding(obj, log_ids, ceiling)
             built.append(records.record(args.type, obj, src=args.src))

@@ -1,7 +1,9 @@
 {
   "type": "object",
   "additionalProperties": false,
-  "required": ["records"],
+  "required": [
+    "records"
+  ],
   "properties": {
     "records": {
       "type": "array",
@@ -9,20 +11,57 @@
       "items": {
         "type": "object",
         "additionalProperties": false,
-        "required": ["statement", "vuln_class", "status", "confidence", "evidence",
-                     "case", "reasoning"],
+        "required": [
+          "statement",
+          "vuln_class",
+          "status",
+          "confidence",
+          "evidence",
+          "case",
+          "reasoning"
+        ],
         "properties": {
-          "statement": {"type": "string"},
-          "vuln_class": {"type": "string"},
-          "status": {"type": "string",
-                     "enum": ["proposed", "investigating", "needs_proof", "refuted",
-                              "inconclusive"]},
-          "confidence": {"type": "number", "minimum": 0, "maximum": 1},
-          "evidence": {"type": "array", "items": {"type": "string"}, "minItems": 1},
-          "case": {"type": "string"},
-          "reasoning": {"type": "string"}
+          "statement": {
+            "type": "string",
+            "maxLength": 400
+          },
+          "vuln_class": {
+            "type": "string",
+            "maxLength": 64
+          },
+          "status": {
+            "type": "string",
+            "enum": [
+              "proposed",
+              "investigating",
+              "needs_proof",
+              "refuted",
+              "inconclusive"
+            ]
+          },
+          "confidence": {
+            "type": "number",
+            "minimum": 0,
+            "maximum": 1
+          },
+          "evidence": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "minItems": 1
+          },
+          "case": {
+            "type": "string",
+            "maxLength": 300
+          },
+          "reasoning": {
+            "type": "string",
+            "maxLength": 1200
+          }
         }
-      }
+      },
+      "maxItems": 64
     }
   }
 }

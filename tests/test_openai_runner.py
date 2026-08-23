@@ -26,6 +26,7 @@ RECORDED: list[dict] = []
 class Handler(BaseHTTPRequestHandler):
     status = 200
     content = "hello"
+    finish_reason = "stop"
 
     def do_POST(self):
         body = json.loads(self.rfile.read(int(self.headers["Content-Length"])))
@@ -33,7 +34,8 @@ class Handler(BaseHTTPRequestHandler):
         cls = type(self)
         self.send_response(cls.status)
         self.send_header("Content-Type", "application/json")
-        payload = (json.dumps({"choices": [{"message": {"content": cls.content}}],
+        payload = (json.dumps({"choices": [{"message": {"content": cls.content},
+                                            "finish_reason": cls.finish_reason}],
                                "usage": {"prompt_tokens": 10, "completion_tokens": 3}})
                    if cls.status == 200 else json.dumps({"error": "no constrained decoding here"}))
         raw = payload.encode()
@@ -49,6 +51,7 @@ class ShimCase(unittest.TestCase):
     def setUp(self):
         RECORDED.clear()
         Handler.status, Handler.content = 200, "hello"
+        Handler.finish_reason = "stop"
         self.srv = HTTPServer(("127.0.0.1", 0), Handler)
         threading.Thread(target=self.srv.serve_forever, daemon=True).start()
         self.addCleanup(self.srv.server_close)
@@ -135,6 +138,38 @@ class TestConstrainedMode(ShimCase):
             self.assertEqual(meta["schema"], want)
 
 
+class TestTruncationAndProvenance(ShimCase):
+    """Both learned from one failed batch on a real model."""
+
+    SCHEMA = str(ROOT / "config" / "schemas" / "hypothesize.json")
+
+    def test_hitting_max_tokens_is_diagnosed_as_truncation(self):
+        """Truncated JSON reaches the parser as a syntax error, which sends you
+        looking at the model's formatting when it was simply cut off."""
+        Handler.finish_reason = "length"
+        Handler.content = '{"records": [{"statement": "half a sen'
+        r = self.run_shim(extra=["--schema", self.SCHEMA])
+        self.assertEqual(r.returncode, 2)
+        self.assertIn("max_tokens", r.stderr)
+        self.assertNotIn("did not parse", r.stderr, "the parse error is the symptom")
+
+    def test_finish_reason_is_in_the_run_meta(self):
+        Handler.content = json.dumps({"records": []})
+        r = self.run_shim(extra=["--schema", self.SCHEMA])
+        meta = json.loads([l for l in r.stderr.splitlines() if l.startswith("{")][-1])
+        self.assertEqual(meta["finish_reason"], "stop")
+
+    def test_raw_output_survives_a_failure(self):
+        """On the real failure the shim printed a diagnosis and threw the text away,
+        so the transcript recorded nothing — provenance is worth least when
+        everything worked."""
+        Handler.content = "this was never going to parse"
+        r = self.run_shim(extra=["--schema", self.SCHEMA])
+        self.assertEqual(r.returncode, 2)
+        self.assertIn("this was never going to parse", r.stderr)
+        self.assertIn("raw output follows", r.stderr)
+
+
 class TestSchemasMatchTheGate(unittest.TestCase):
     """A schema that drifts from `admit` produces output that is well-formed and
     rejected — the most annoying possible failure, and a mechanical one to prevent."""
@@ -169,15 +204,35 @@ class TestSchemasMatchTheGate(unittest.TestCase):
             self.assertLessEqual(tiers[tier]["ordinal"], tiers["static_trace"]["ordinal"],
                                  f"{tier} needs a dynamic run")
 
+    def test_free_text_fields_are_bounded(self):
+        """An unbounded string in a constrained grammar is how a model runs away:
+        one batch on a real run spent all 4096 tokens looping inside a field and
+        came back as truncated JSON. Bounds shrink the blast radius; they do not
+        make the failure impossible, which is why the shim also diagnoses it."""
+        for agent in ("hypothesize", "report"):
+            items = self.load(agent)
+            for name, spec in items["properties"].items():
+                if spec.get("type") == "string" and "enum" not in spec:
+                    self.assertIn("maxLength", spec, f"{agent}.{name} is unbounded")
+            doc = json.loads((ROOT / "config" / "schemas" / f"{agent}.json").read_text())
+            self.assertIn("maxItems", doc["properties"]["records"],
+                          f"{agent} record array is unbounded")
+
     def test_severity_enum_matches_admit(self):
         from source_analyst.lifecycle.admit import SEVERITIES
         self.assertEqual(set(self.load("report")["properties"]["severity"]["enum"]),
                          set(SEVERITIES))
 
-    def test_every_agent_prompt_has_a_schema(self):
-        for prompt in sorted((ROOT / "agents").glob("*.md")):
-            self.assertTrue((ROOT / "config" / "schemas" / f"{prompt.stem}.json").is_file(),
-                            f"no schema for agent {prompt.stem}")
+    def test_every_briefable_agent_has_a_prompt_and_a_schema(self):
+        """Keyed on what `brief` can actually brief, not on what files exist in
+        agents/ — a driver agent like the orchestrator emits no records to admit,
+        so demanding a record schema from it would be demanding the wrong thing."""
+        from source_analyst.lifecycle.brief import INSTRUCTIONS
+        for agent in INSTRUCTIONS:
+            self.assertTrue((ROOT / "agents" / f"{agent}.md").is_file(),
+                            f"no prompt for agent {agent}")
+            self.assertTrue((ROOT / "config" / "schemas" / f"{agent}.json").is_file(),
+                            f"no schema for agent {agent}")
 
 
 class TestThroughRunAgent(ShimCase):
