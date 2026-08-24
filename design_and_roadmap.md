@@ -733,6 +733,38 @@ every sanitizer candidate resolves into `java.sql` or `java.lang` and has no bod
 the tree, so a list of those alone returns eight stubs and teaches the agent nothing.
 27 of 35 in-tree methods resolve, including `SqlInjectionLesson8.log()`.
 
+**What the first live trace runs showed (2026-08-24).** Three failures, all the same
+shape — a field contradicting the prose beside it — and the responses differ by what
+the mistake would cost:
+
+  * A case was **refuted at 0.95 confidence** whose own `basis` ends "the vulnerability
+    exists because the input is still concatenated into the query string regardless of
+    the sanitizer's outcome". The reasoning was right and the status field was not.
+    Nothing here can read prose, so: the prompt states the rule (a sanitizer on the
+    path is never grounds to refute — that is a verdict, and the case stays open), and
+    `render` flags *any* refutation on a sanitizer-carrying path regardless of
+    confidence. That warning matters because the refuted list is ordered weakest-first
+    on the assumption that low confidence marks the risky exclusions; this case is the
+    counter-example and would have sorted to the very bottom of it.
+  * A verdict of **`sound`** on a method whose rationale reads "does not contain any
+    logic that would prevent SQL injection". Same contradiction, far more expensive:
+    `sound` is the only verdict that *prunes*, so a wrong one removes a live
+    vulnerability from every later run and nothing downstream would question it. It now
+    carries `requires_dynamic: true` — the mirror of `confirmed` on a status, refused
+    for the mirror reason: a static read can show a defence *fails*, never that it
+    holds against every input. Enforced in the grammar first (the model cannot emit
+    what the enum lacks), then at the gate, then said plainly in the prompt.
+  * A verdict naming `...Lesson6a.unionQueryChecker` against a fact whose `full_name`
+    ends `:boolean(java.lang.String)`. That one was **our** bug: the gate refused a
+    spelling, not a claim. The qualified name is accepted when it picks out exactly one
+    method that was read, and normalised; two overloads read still refuses, because the
+    signature is all that separates them.
+
+The through-line: a gate should refuse what the substrate cannot support, and nothing
+else. Formatting belongs to the grammar, and where a model's prose and its fields can
+disagree, only the fields can be checked — so the expensive ones are made unreachable
+rather than merely discouraged.
+
 Not yet built: the `checkpoint` agent (the human-in-loop depth gate, §4.2 — the value
 is in `config/depth.yaml` and read by nothing; a run today is bounded by `max` and the
 spend gate alone), and re-tracing at `--status refuted` has the machinery but has not
