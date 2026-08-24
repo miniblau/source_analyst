@@ -453,16 +453,21 @@ def main(argv: list[str] | None = None) -> int:
     header["cases" if args.agent == "hypothesize" else "hypotheses"] = len(rows)
     header["prior_beliefs"] = len(beliefs)
 
-    print(json.dumps(header, ensure_ascii=False, separators=(",", ":")))
-    for b in beliefs:
-        print(json.dumps({"kind": "prior_belief", **b}, ensure_ascii=False,
-                         separators=(",", ":")))
-    for row in rows:
-        print(json.dumps(row, ensure_ascii=False, separators=(",", ":")))
+    written = 0
+    for obj in [header] + [{"kind": "prior_belief", **b} for b in beliefs] + rows:
+        line = json.dumps(obj, ensure_ascii=False, separators=(",", ":"))
+        print(line)
+        written += len(line.encode()) + 1
 
+    # `bytes` because rows are a bad proxy for size and this is the number that
+    # actually fails: a two-case trace briefing carrying callee source ran to 15.4k
+    # tokens against a 16384 context and the batch died mid-record. Note that
+    # bytes/4 is the wrong conversion for source — Java identifiers and code
+    # measured about 2.3 chars per token, so budget against the smaller number.
     print(json.dumps({"cmd": "brief", "agent": args.agent, "rows": len(rows),
                       "rows_total": total, "chunk": args.chunk, "chunks": n_chunks,
-                      "beliefs": len(beliefs), "log": str(store.log_path())},
+                      "beliefs": len(beliefs), "bytes": written,
+                      "log": str(store.log_path())},
                      separators=(",", ":")), file=sys.stderr)
     return 0
 

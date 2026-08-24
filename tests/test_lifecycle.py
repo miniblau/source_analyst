@@ -341,6 +341,15 @@ class TestChunking(unittest.TestCase):
     def test_chunk_without_size_is_rejected(self):
         self.assertNotEqual(self.run_brief("--chunk", "1").returncode, 0)
 
+    def test_meta_reports_the_briefing_size(self):
+        """Rows are a bad proxy for size, and size is what actually fails: a two-case
+        trace briefing carrying callee source ran to 15.4k tokens against a 16384
+        context and the batch died mid-record. The number a driver needs is bytes."""
+        r = self.run_brief()
+        meta = json.loads(r.stderr.strip().splitlines()[-1])
+        self.assertEqual(meta["bytes"], len(r.stdout.encode()))
+        self.assertGreater(meta["bytes"], 0)
+
     def test_unchunked_briefing_is_unchanged(self):
         rows = self.rows()
         self.assertEqual(rows[0]["chunk"], {"index": 0, "of": 1, "rows": 5, "rows_total": 5})
