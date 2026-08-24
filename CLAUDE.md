@@ -228,6 +228,17 @@ Any of these means pause and raise it, don't code through it:
 - A query returns empty and you're about to call it "no vuln" → disambiguate first.
 - You're about to emit a field that asserts something the substrate cannot prove
   (`sanitized`, `exploitable`, `unsanitized_path_exists`) → it's a belief, not a fact.
+- A *belief* that would let a later run stop looking → check what tier can support it.
+  `sound` prunes, so it needs a dynamic tier for the same reason `confirmed` does: a
+  static read shows a defence *fails*, never that it holds against every input. The
+  cost of a wrong pruning verdict is a live vulnerability removed from every future
+  run, unquestioned — so make it unreachable in the grammar, not merely discouraged
+  in a prompt.
+- A model's prose and its structured fields can disagree, and only the fields are
+  checkable. Observed three times in one afternoon: a basis arguing a bug under a
+  `refuted` status, a rationale describing no sanitizer under a `sound` verdict. Where
+  the field is expensive, remove the option; where it is cheap, have the renderer flag
+  the shape deterministically. Do not settle for asking the model more firmly.
 - An agent prompt names a vuln class ("SQL", "XSS") → it belongs in the manifest
   `narrative`; the prompt must work unchanged for the next class.
 - You're adding an abstraction "for later" → YAGNI; build the concrete phase need.
