@@ -76,12 +76,19 @@ def main(argv: list[str] | None = None) -> int:
 
     log = list(store.read())
     by_id = {r["id"]: r for r in log}
-    findings = [r for r in log if r.get("type") == "finding"]
     # Leaves only. A traced log holds one hypothesis per level per site: counting the
     # whole chain inflates every status tally, lists a refuted case once per level it
     # was traced through, and makes "every candidate was refuted" fire on a set that
     # is mostly its own history.
     stale = store.revised_hypotheses(log)
+    all_findings = [r for r in log if r.get("type") == "finding"]
+    # A finding is a write-up OF a hypothesis. When a later level revised that
+    # hypothesis the write-up describes a judgement that has been superseded, and
+    # rendering both puts the same site in the report twice — once with the old
+    # confidence. Dropped, and counted, because a report that is quietly shorter than
+    # the log is its own kind of lie.
+    findings = [f for f in all_findings if f.get("hypothesis") not in stale]
+    stale_findings = len(all_findings) - len(findings)
     hyps = [r for r in log if r.get("type") == "hypothesis" and r["id"] not in stale]
     refuted = [h for h in hyps if h.get("status") == "refuted"]
     beliefs = store.project()
@@ -145,7 +152,12 @@ def main(argv: list[str] | None = None) -> int:
           + "\n")
         w(f"- hypotheses: **{len(hyps)}**"
           + (f" ({', '.join(f'{n} {s}' for s, n in sorted(by_status.items()))})"
-             if hyps else "") + "\n\n")
+             if hyps else "") + "\n")
+        if stale:
+            w(f"- superseded by a later `trace` level and not counted above: "
+              f"**{len(stale)}** hypothesis/es"
+              + (f", **{stale_findings}** finding(s)" if stale_findings else "") + "\n")
+        w("\n")
         if not facts:
             w("**Nothing was analysed.** No query has written a fact to this log, so this "
               "document reports on nothing at all. Run the substrate queries first.\n\n")

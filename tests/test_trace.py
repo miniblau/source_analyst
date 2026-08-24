@@ -418,6 +418,39 @@ class TestATracedLogIsReadCorrectlyDownstream(unittest.TestCase):
         store.append([finding], self.log)
         self.assertNotIn("Traced to depth", self._render().stdout)
 
+    def test_a_finding_about_a_revised_hypothesis_is_not_rendered_twice(self):
+        """A finding is a write-up OF a hypothesis. Re-running the report leg after a
+        trace level writes a second one for the same site; rendering both puts it in
+        the report twice, once with the superseded confidence."""
+        old_f = records.record("finding",
+                               {"hypothesis": self.root["id"], "title": "stale write-up",
+                                "severity": "high", "tier": "static_reachability",
+                                "recreation": "r", "refs": ["A.java:20"], "caveats": "c"},
+                               "agent:report")
+        new_f = records.record("finding",
+                               {"hypothesis": self.child["id"], "title": "current write-up",
+                                "severity": "high", "tier": "static_reachability",
+                                "recreation": "r", "refs": ["A.java:20"], "caveats": "c"},
+                               "agent:report")
+        store.append([old_f, new_f], self.log)
+        out = self._render().stdout
+        self.assertIn("current write-up", out)
+        self.assertNotIn("stale write-up", out)
+        self.assertIn("1 finding(s)", out)
+
+    def test_what_was_superseded_is_stated_not_silently_dropped(self):
+        """A report quietly shorter than the log is its own kind of lie."""
+        stale_f = records.record("finding",
+                                 {"hypothesis": self.root["id"], "title": "t",
+                                  "severity": "high", "tier": "static_reachability",
+                                  "recreation": "r", "refs": ["A.java:20"], "caveats": "c"},
+                                 "agent:report")
+        store.append([stale_f], self.log)
+        out = self._render().stdout
+        self.assertIn("superseded by a later `trace` level", out)
+        self.assertIn("**1** hypothesis/es", out)
+        self.assertIn("**1** finding(s)", out)
+
     def test_render_counts_a_revised_case_once(self):
         """Counting the whole chain inflates every status tally in the summary, and
         would make "every candidate was refuted" fire on a set that is mostly its own
