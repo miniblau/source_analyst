@@ -86,6 +86,10 @@ about code nobody had read. You have the body now. Quote the line that decides i
 **Say what the body did *not* contain.** "No database call appears anywhere in this
 method" is a strong, checkable statement. "This looks like file handling" is not.
 
+**Never refute and audit the defence in the same breath.** If you record any verdict,
+the case is an instance of the class whose defence you are judging — so its status is
+`needs_proof` or `inconclusive`, never `refuted`. `admit` refuses the combination.
+
 **A sanitizer on the path is never a reason to refute.** `refuted` means the evidence
 shows this is *not* an instance of the class at all — the sink is not what the pattern
 hoped for, or the value cannot carry the attack. It does not mean "something on the

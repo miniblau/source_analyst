@@ -155,6 +155,25 @@ def check_trace(obj: dict, log_recs: dict[str, dict], dynamic: bool,
                if len(names) == 1 and q not in read}
 
     vocab = verdict_vocab()
+    if obj["status"] == "refuted" and (obj.get("verdicts") or []):
+        # Field against field, and they contradict. `refuted` says the evidence shows
+        # this is not an instance of the class; a verdict says something about a
+        # DEFENCE on the path — which only matters if the case was an instance. The
+        # only verdict that could justify dropping a case on those grounds is `sound`,
+        # and a static run cannot reach it.
+        #
+        # Measured, and expensive: the first full traced run refuted seven real
+        # vulnerabilities, six at 0.95 confidence, and recorded `unsound` on the very
+        # sanitizers those cases turned on. It had written down that the defence does
+        # not hold and dropped the case anyway. Recall fell 1.0 -> 0.696 against the
+        # flat pass that had seen less.
+        raise AdmitError(
+            f"revision is `refuted` while recording {len(obj['verdicts'])} verdict(s) on "
+            f"the path's defences — those contradict. A verdict says a defence does or "
+            f"does not hold, which only matters if this IS an instance of the class; "
+            f"`refuted` says it is not. If the defence is why you are dropping the case, "
+            f"that needs `sound`, which a static run cannot assert — so the case stays "
+            f"open at `needs_proof` or `inconclusive`")
     seen = set()
     for v in obj.get("verdicts") or []:
         if not isinstance(v, dict):

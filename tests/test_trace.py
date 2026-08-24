@@ -307,6 +307,26 @@ class TestAdmitTrace(unittest.TestCase):
         self.assertEqual(r.returncode, 0, r.stderr)
         self.assertEqual(self.records_of("belief")[0]["verdict"], "sound")
 
+    def test_refuting_while_auditing_the_defence_is_a_contradiction(self):
+        """Field against field. `refuted` says this is not an instance of the class; a
+        verdict says something about a defence on the path, which only matters if it
+        is. Measured on the first full traced run: seven real vulnerabilities refuted,
+        six at 0.95, with `unsound` recorded on the very sanitizers they turned on —
+        the agent wrote down that the defence does not hold and dropped the case
+        anyway. Recall 1.0 -> 0.696 against a flat pass that had seen less."""
+        r = self.run_admit(self.rev(status="refuted", verdicts=[
+            {"subject": "p.Helper.escape:S(S)", "verdict": "unsound",
+             "rationale": "it only replaces x with y"}]))
+        self.assertNotEqual(r.returncode, 0)
+        self.assertIn("contradict", r.stderr)
+        self.assertEqual(self.records_of("belief"), [])
+
+    def test_refuting_for_an_unrelated_reason_is_still_allowed(self):
+        """A refutation that makes no claim about the path's defences is exactly what
+        the flat pass already does well, and must stay possible."""
+        r = self.run_admit(self.rev(status="refuted"))
+        self.assertEqual(r.returncode, 0, r.stderr)
+
     def test_an_unknown_verdict_is_rejected(self):
         r = self.run_admit(self.rev(verdicts=[
             {"subject": "p.Helper.escape:S(S)", "verdict": "probably_fine", "rationale": "r"}]))
