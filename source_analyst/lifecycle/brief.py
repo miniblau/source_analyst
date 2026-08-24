@@ -436,9 +436,17 @@ def main(argv: list[str] | None = None) -> int:
         # writes the same site up once per level and the report reads as though the
         # substrate found twice what it found. Measured on WebGoat: 23 sites, 46 rows.
         stale = store.revised_hypotheses(log)
+        # Already written up. Unlike `trace`, this leg is not self-consuming — a
+        # finding does not remove its hypothesis from the selection — so a pass that
+        # died halfway used to re-brief everything on the next run and write a SECOND
+        # finding for every case it had already done. Findings are ULID events, so
+        # nothing dedupes them and the report simply doubles. Skipping them makes the
+        # pass resumable and idempotent, which is what every other leg already is.
+        reported = {r["hypothesis"] for r in log
+                    if r.get("type") == "finding" and r.get("hypothesis")}
         wanted = {h["id"]: h for h in log
                   if h.get("type") == "hypothesis" and h.get("status") == args.status
-                  and h["id"] not in stale}
+                  and h["id"] not in stale and h["id"] not in reported}
         by_id = {r["id"]: r for r in log}
         rows = []
         for hid, h in sorted(wanted.items()):

@@ -484,6 +484,26 @@ class TestATracedLogIsReadCorrectlyDownstream(unittest.TestCase):
         store.append([finding], self.log)
         self.assertNotIn("Traced to depth", self._render().stdout)
 
+    def test_the_report_leg_does_not_rewrite_what_it_already_wrote(self):
+        """Unlike `trace`, this leg is not self-consuming — a finding does not remove
+        its hypothesis from the selection. A pass that died halfway used to re-brief
+        everything and write a SECOND finding for every case it had already done, and
+        findings are ULID events so nothing dedupes them."""
+        done = records.record("finding",
+                              {"hypothesis": self.child["id"], "title": "already written",
+                               "severity": "high", "tier": "static_reachability",
+                               "recreation": "r", "refs": ["A.java:20"], "caveats": "c"},
+                              "agent:report")
+        store.append([done], self.log)
+        r = subprocess.run(
+            [sys.executable, "-m", "source_analyst.lifecycle.brief", "--agent", "report",
+             "--class", "sqli", "--lang", "java", "--status", "needs_proof"],
+            cwd=ROOT, env=self.env, capture_output=True, text=True)
+        self.assertEqual(r.returncode, 0, r.stderr)
+        rows = [json.loads(x) for x in r.stdout.splitlines()
+                if json.loads(x).get("kind") == "hypothesis"]
+        self.assertEqual(rows, [], "the only hypothesis has a finding already")
+
     def test_a_finding_about_a_revised_hypothesis_is_not_rendered_twice(self):
         """A finding is a write-up OF a hypothesis. Re-running the report leg after a
         trace level writes a second one for the same site; rendering both puts it in
