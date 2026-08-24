@@ -288,8 +288,13 @@ def _trace_rows(log: list[dict], status: str, cfg: dict[str, Any]) -> list[dict]
         wanted = callees_of(h, by_id)
         rows.append({
             "kind": "trace_case",
+            # `parent` is deliberately NOT here. The agent revises the case it is
+            # shown and its ancestry is the log's business, not its own — and sending
+            # it put two plausible ids in front of a model asked for exactly one.
+            # Observed: a revision addressed to the grandparent, which would have
+            # forked the chain had the gate not refused it.
             "hypothesis": {k: h.get(k) for k in
-                           ("id", "statement", "status", "confidence", "depth", "parent")},
+                           ("id", "statement", "status", "confidence", "depth")},
             # Same step-slimming the flat pass gets: on a trace briefing the path
             # steps were 36% of the whole thing, and a step repeats the previous
             # step's file and fully-qualified method far more often than not.

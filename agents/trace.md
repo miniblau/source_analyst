@@ -61,7 +61,9 @@ One JSON object per `trace_case`, in the order given, nothing else on stdout:
                "rationale": "quotes the code you read"}]}
 ```
 
-- `parent` — the `hypothesis.id` you were given. `admit` rejects an id it cannot find.
+- `parent` — the `hypothesis.id` you were given, exactly as written. It is the only id
+  in the case. `admit` rejects an id it cannot find, and refuses a second revision of
+  one that already has a child.
 - `evidence` — the fact ids you relied on, **including the callee bodies you read**.
   A revision argued from a body that is not cited is a claim with no provenance.
   **Also keep the ids from the case's own `evidence`.** Those are what locate this
