@@ -243,6 +243,21 @@ def traceable(log: list[dict], status: str, cfg: dict[str, Any]) -> list[dict]:
     return sorted(out, key=lambda h: h["id"])
 
 
+def _body_stub(f: dict) -> dict:
+    """A callee_body as the REPORT leg needs it: that it was read, and what it is.
+
+    The report writes a recreation flow — entry point, parameter, transformation,
+    sink — which comes off the flow facts. What the body showed is already distilled
+    into the hypothesis's `basis`, so shipping the source again is the same text a
+    third time. Measured: a three-case report briefing on twice-traced cases reached
+    15.3k tokens of a 16384 context and left no room for the answer.
+    """
+    if f.get("kind") != "callee_body":
+        return f
+    return {k: f[k] for k in ("id", "kind", "full_name", "name", "status", "file",
+                              "line_start", "line_end") if k in f}
+
+
 def _slim_evidence(f: dict) -> dict:
     """A fact as an agent should see it: path steps carry forward, as in `_cases`."""
     if not f.get("steps"):
@@ -487,7 +502,7 @@ def main(argv: list[str] | None = None) -> int:
             # branching existed. A pass that has run fine for weeks can be pushed over
             # a context limit by a change two legs upstream.
             rows.append({"kind": "hypothesis", "hypothesis": h,
-                         "evidence": [_slim_callee(_slim_evidence(by_id[e]))
+                         "evidence": [_body_stub(_slim_evidence(by_id[e]))
                                       for e in h.get("evidence", []) if e in by_id]})
         if args.limit:
             rows = rows[:args.limit]
