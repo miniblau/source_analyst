@@ -200,8 +200,23 @@ def site_of(rec: dict, facts: dict[str, dict]) -> str | None:
 def score(log: list[dict], truth: dict, vuln_class: str, src: str | None) -> dict[str, Any]:
     vocab = statuses()
     facts = {r["id"]: r for r in log if r.get("type") == "fact"}
+    # A traced log holds one hypothesis per level per site, all at the same status.
+    # Which of them to grade depends on the question being asked, and the two
+    # questions are different:
+    #
+    #   --src <producer>  "how did THAT agent do" — grade what it produced, including
+    #                     judgements a later level has since revised. Dropping them
+    #                     would score the hypothesize leg at zero on any traced log.
+    #   no --src          "how does the case set stand NOW" — leaves only. Grading a
+    #                     hypothesis alongside its own revision counts one site twice,
+    #                     and feeds calibration duplicate points that inflate n.
+    #
+    # Measured on a traced WebGoat log: 49 scored over 26 sites.
+    stale = ({h["parent"] for h in log
+              if h.get("type") == "hypothesis" and h.get("parent")} if src is None else set())
     mine = [r for r in log if r.get("type") == "hypothesis"
-            and (src is None or r.get("src") == src)]
+            and (src is None or r.get("src") == src)
+            and r["id"] not in stale]
     hyps = [r for r in mine if r.get("vuln_class") == vuln_class]
     # Counted and named, never dropped in silence. A run where four judgements
     # carried a mistyped class scored 22/26 and looked flawless; the four missing
@@ -269,6 +284,9 @@ def score(log: list[dict], truth: dict, vuln_class: str, src: str | None) -> dic
     return {
         "kind": "scorecard", "class": vuln_class, "target": truth["target"],
         "commit": str(truth.get("commit", "")), "src": src or "",
+        # Never silent: a reader must be able to tell a small scored set from a
+        # filter that quietly removed half the log.
+        "superseded_excluded": len(stale),
         "scored": len(rows), "unlabelled": len(unlabelled),
         "skipped_other_class": other_class,
         "cases": {"true_positive": len(tp), "false_negative": len(fn),

@@ -385,6 +385,38 @@ class TestCli(unittest.TestCase):
         self.assertEqual(out[1]["kind"], "scored_case")
         self.assertEqual(out[1]["sink"], "A.java:20")
 
+    def test_a_revised_case_is_scored_once_not_once_per_level(self):
+        """A traced log holds one hypothesis per level per site, all at the same
+        status. Grading a hypothesis alongside its own revision counts the site twice
+        and feeds calibration duplicate points that inflate n. Measured on a traced
+        WebGoat log: 49 scored over 26 sites."""
+        f = flow("A.java", 20)
+        root = hyp(f["id"], "needs_proof", 0.5)
+        child = records.record("hypothesis",
+                               {"statement": "s", "vuln_class": "sqli",
+                                "status": "needs_proof", "confidence": 0.9,
+                                "evidence": [f["id"]], "parent": root["id"], "depth": 1},
+                               src="agent:trace")
+        store.append([f, root, child], self.log)
+        card = json.loads(self.run_score().stdout.splitlines()[0])
+        self.assertEqual(card["scored"], 1)
+        self.assertEqual(card["superseded_excluded"], 1)
+
+    def test_scoring_a_producer_keeps_what_that_producer_said(self):
+        """The other question. Dropping superseded rows under --src would score the
+        hypothesize leg at zero on any log that has been traced."""
+        f = flow("A.java", 20)
+        root = hyp(f["id"], "needs_proof", 0.5)
+        child = records.record("hypothesis",
+                               {"statement": "s", "vuln_class": "sqli",
+                                "status": "needs_proof", "confidence": 0.9,
+                                "evidence": [f["id"]], "parent": root["id"], "depth": 1},
+                               src="agent:trace")
+        store.append([f, root, child], self.log)
+        card = json.loads(self.run_score(["--src", "agent:test"]).stdout.splitlines()[0])
+        self.assertEqual(card["scored"], 1)
+        self.assertEqual(card["superseded_excluded"], 0)
+
     def test_scoring_writes_nothing_to_the_log(self):
         """A scorecard is a measurement of a model, not a fact about the code."""
         f = flow("A.java", 20)

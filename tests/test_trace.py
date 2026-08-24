@@ -248,5 +248,44 @@ class TestAdmitTrace(unittest.TestCase):
         self.assertEqual(len(list(store.read(self.log))), before)
 
 
+class TestATracedLogIsReadCorrectlyDownstream(unittest.TestCase):
+    """A second level does not just add records — it changes what "the hypotheses"
+    means. Everything that reads them has to mean the leaf, or one site is counted
+    once per level it was traced through."""
+
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(self.tmp.cleanup)
+        self.log = Path(self.tmp.name) / "log.jsonl"
+        self.env = dict(os.environ, SOURCE_ANALYST_LOG=str(self.log))
+        flow = records.fact(
+            {"kind": "flow", "subject": "p.C.h:R(S)", "object": "p.C.q:R(S)",
+             "source_name": "q", "source_file": "A.java", "source_line": 10,
+             "sink_name": "executeQuery", "sink_file": "A.java", "sink_line": 20,
+             "sink_full_name": "java.sql.Statement.executeQuery:R(S)",
+             "steps": []}, "cpg:reachable")
+        root = records.record("hypothesis",
+                              {"statement": "s", "vuln_class": "sqli", "status": "needs_proof",
+                               "confidence": 0.6, "evidence": [flow["id"]]}, "agent:hypothesize")
+        child = records.record("hypothesis",
+                               {"statement": "s2", "vuln_class": "sqli", "status": "needs_proof",
+                                "confidence": 0.8, "evidence": [flow["id"]],
+                                "parent": root["id"], "depth": 1}, "agent:trace")
+        store.append([flow, root, child], self.log)
+        self.root, self.child = root, child
+
+    def test_report_is_briefed_on_the_leaf_not_the_whole_chain(self):
+        """Measured on WebGoat: 23 sites, 46 rows. Every site written up once per
+        level, and the report reads as though the substrate found twice what it did."""
+        r = subprocess.run(
+            [sys.executable, "-m", "source_analyst.lifecycle.brief", "--agent", "report",
+             "--class", "sqli", "--lang", "java", "--status", "needs_proof"],
+            cwd=ROOT, env=self.env, capture_output=True, text=True)
+        self.assertEqual(r.returncode, 0, r.stderr)
+        rows = [json.loads(x) for x in r.stdout.splitlines()
+                if json.loads(x).get("kind") == "hypothesis"]
+        self.assertEqual([row["hypothesis"]["id"] for row in rows], [self.child["id"]])
+
+
 if __name__ == "__main__":
     unittest.main()
