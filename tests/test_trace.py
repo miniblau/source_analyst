@@ -287,6 +287,66 @@ class TestATracedLogIsReadCorrectlyDownstream(unittest.TestCase):
         self.assertEqual([row["hypothesis"]["id"] for row in rows], [self.child["id"]])
 
 
+    def _render(self):
+        return subprocess.run(
+            [sys.executable, "-m", "source_analyst.lifecycle.render",
+             "--class", "sqli", "--target", "t"],
+            cwd=ROOT, env=self.env, capture_output=True, text=True)
+
+    def test_a_traced_finding_says_what_was_read(self):
+        """If the loop read a method and the report does not say so, a reader cannot
+        tell a judgement made from the code from one made from the call site alone —
+        which is the only distinction this leg exists to create."""
+        body = records.fact({"kind": "callee_body", "full_name": "p.Helper.escape:S(S)",
+                             "status": "resolved", "name": "escape", "body": "..."},
+                            "cpg:callee_body")
+        traced = records.record("hypothesis",
+                                {"statement": "s3", "vuln_class": "sqli",
+                                 "status": "needs_proof", "confidence": 0.9,
+                                 "evidence": [body["id"]], "parent": self.child["id"],
+                                 "depth": 2, "basis": "the escape only handles quotes",
+                                 "read": ["p.Helper.escape:S(S)"]}, "agent:trace")
+        finding = records.record("finding",
+                                 {"hypothesis": traced["id"], "title": "t", "severity": "high",
+                                  "tier": "static_reachability", "recreation": "r",
+                                  "refs": ["A.java:20"], "caveats": "c"}, "agent:report")
+        store.append([body, traced, finding], self.log)
+        out = self._render().stdout
+        self.assertIn("Traced to depth 2", out)
+        self.assertIn("p.Helper.escape", out)
+        self.assertIn("the escape only handles quotes", out)
+
+    def test_a_trace_level_that_read_nothing_says_so(self):
+        """A level whose callees were all outside the tree must not read like one that
+        examined everything and found nothing wrong. That is the gap-as-acquittal
+        failure, arriving through the report instead of through a verdict."""
+        stub = records.fact({"kind": "callee_body", "full_name": "java.sql.Statement.x:R()",
+                             "status": "external_stub", "name": "x", "body": ""},
+                            "cpg:callee_body")
+        traced = records.record("hypothesis",
+                                {"statement": "s3", "vuln_class": "sqli",
+                                 "status": "needs_proof", "confidence": 0.9,
+                                 "evidence": [stub["id"]], "parent": self.child["id"],
+                                 "depth": 2, "basis": "nothing could be established",
+                                 "read": []}, "agent:trace")
+        finding = records.record("finding",
+                                 {"hypothesis": traced["id"], "title": "t", "severity": "high",
+                                  "tier": "static_reachability", "recreation": "r",
+                                  "refs": ["A.java:20"], "caveats": "c"}, "agent:report")
+        store.append([stub, traced, finding], self.log)
+        out = self._render().stdout
+        self.assertIn("No callee body on this path could be read", out)
+        self.assertIn("outside the analysed tree", out)
+
+    def test_an_untraced_finding_claims_no_depth(self):
+        finding = records.record("finding",
+                                 {"hypothesis": self.root["id"], "title": "t",
+                                  "severity": "high", "tier": "static_reachability",
+                                  "recreation": "r", "refs": ["A.java:20"], "caveats": "c"},
+                                 "agent:report")
+        store.append([finding], self.log)
+        self.assertNotIn("Traced to depth", self._render().stdout)
+
     def test_render_counts_a_revised_case_once(self):
         """Counting the whole chain inflates every status tally in the summary, and
         would make "every candidate was refuted" fire on a set that is mostly its own

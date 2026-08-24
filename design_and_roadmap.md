@@ -679,6 +679,41 @@ not just eyeballed. Breadth waits (decided 2026-08-21).
 manifest and must never name a vuln class themselves. If a prompt contains the word
 "SQL", that is a bug. The running check is "would this prompt work unchanged for SSRF?"
 
+### 8.1 What a second model actually showed (2026-08-24)
+
+Run against the same 348-fact substrate log as the first pass, so only the model
+varies. The point was never a leaderboard — it was to find out whether `score` and
+the gates *discriminate*, or whether they rubber-stamp whatever arrives.
+
+| runner | outcome |
+|---|---|
+| `tests/stub_runner.py` (no model) | precision 0.885, confidence separation 0.0. Judges nothing, by construction. Cannot descend a trace level: it keeps confidence flat and the spend gate refuses to fund it. |
+| Qwen3-Coder-30B-A3B Q5_K_XL | 26/26, precision / recall / site_recall 1.0. The first pass. |
+| Qwen2.5-0.5B-Instruct Q4_K_M | **Could not produce an admissible batch.** Four cases in, one record out; the three missing cases silently unjudged. Also wrote the class's human title where its identifier belongs. |
+| Qwen3.8-27B dense Q4_K_XL | **Not obtained.** Measured at 1.36 tok/s generation on this box (16.7GB of weights against ~25GB/s of memory bandwidth, and it pushed 8GB into swap): 24 minutes for the first of seven batches, ~5h for the pass. Stopped in favour of exercising the trace loop against a real model. The number is recorded because it is the reason, not an excuse — a dense 27B is not a model this hardware can run a review with. |
+
+The 0.5B is the informative row. It failed in two ways that the system had no gate
+for, and both were the *same* failure the 30B had made in a milder form:
+
+  * it wrote `vuln_class: "SQL injection"` — the manifest's `title` where its `class`
+    belongs. `admit` rejected the batch. But constrained decoding exists precisely to
+    keep formatting out of the measurement, so rejecting correct judgements over a
+    spelling was our bug, not the model's: the title is now accepted as an alias and
+    normalised to the identifier at the door. Naming a *different* class is still
+    refused — that is comprehension, not formatting.
+  * it returned one record for four cases and `run_agent` exited 0. Nothing downstream
+    could tell the three missing cases from cases the model had considered and
+    dismissed; the log was simply short, and short reads as complete. `run_agent` now
+    counts the cases it briefed and refuses a short return — and *withholds stdout*
+    when it does, because a non-zero exit stops the next command in a script, never
+    the pipe already in flight.
+
+So the honest summary: **a second scorecard of judgement was not obtained on this
+hardware, and the apparatus discriminated anyway.** A model far below the floor did
+not score badly — it could not get through the door, which is what the door is for.
+
+---
+
 **Phase 2 — Branching + learning. IN PROGRESS (started 2026-08-24).**
 `trace` subagent, hypothesis tree, `spend_gate`, `checkpoint` subagent, belief-store
 trust decisions. This is where it starts feeling like you.

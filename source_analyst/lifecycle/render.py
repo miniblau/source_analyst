@@ -204,6 +204,34 @@ def main(argv: list[str] | None = None) -> int:
               "effectiveness is not. Because reported paths are representative rather "
               "than exhaustive, a route reaching this sink with no sanitizer at all may "
               "exist and simply not have been enumerated.\n\n")
+        # What a trace level actually established, stated deterministically. If the
+        # loop read a method and the report does not say so, the reader cannot tell a
+        # judgement made from the code from one made from the call site alone — which
+        # is the distinction the whole leg exists to create. `depth` is the honest
+        # measure of how much work stands behind the number above.
+        if int(h.get("depth", 0) or 0) > 0:
+            read = [n for n in (h.get("read") or []) if str(n).strip()]
+            bodies = sorted({by_id.get(fid, {}).get("full_name")
+                             for fid in h.get("evidence", [])
+                             if by_id.get(fid, {}).get("kind") == "callee_body"
+                             and by_id.get(fid, {}).get("status") == "resolved"} - {None})
+            w(f"**Traced to depth {h['depth']}.** ")
+            if bodies:
+                w(f"The source of {len(bodies)} method(s) on this path was read: "
+                  + ", ".join(f"`{b.split(':')[0]}`" for b in bodies[:8])
+                  + ("," if len(bodies) > 8 else "")
+                  + (f" and {len(bodies) - 8} more." if len(bodies) > 8 else ".") + " ")
+            else:
+                # The gap, said out loud. A trace level that read nothing must not
+                # look like one that read everything and found nothing wrong.
+                w("No callee body on this path could be read — every method the "
+                  "substrate was asked for lay outside the analysed tree. This level "
+                  "added no code the agent could argue from. ")
+            if str(h.get("basis", "")).strip():
+                w(f"{h['basis'].strip()}")
+            if read and not bodies:
+                w(f" (Claimed read: {', '.join(f'`{r}`' for r in read[:4])}.)")
+            w("\n\n")
         w("**Recreation**\n\n```\n" + f.get("recreation", "") + "\n```\n\n")
         w("**References**\n\n" + "".join(f"- `{r}`\n" for r in f.get("refs", [])) + "\n")
         # Never render a bare heading: an empty caveats section reads as "nothing to
