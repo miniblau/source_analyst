@@ -27,6 +27,7 @@ from .. import records
 from ..belief import store
 from ..cpg.workspace import repo_root
 from ..manifest.loader import ManifestError, load_class, load_patterns, tier_table
+from .admit import statuses
 
 CASE_KEY = ("sink_file", "sink_line", "source_file", "source_line", "source_name")
 
@@ -216,6 +217,7 @@ def traceable(log: list[dict], status: str, cfg: dict[str, Any]) -> list[dict]:
     hyps = [h for h in log if h.get("type") == "hypothesis"]
     by_id = {h["id"]: h for h in hyps}
     has_child = store.revised_hypotheses(log)
+    vocab = statuses()
     out = []
     for h in hyps:
         if h.get("status") != status or h["id"] in has_child:
@@ -223,7 +225,14 @@ def traceable(log: list[dict], status: str, cfg: dict[str, Any]) -> list[dict]:
         depth = int(h.get("depth", 0) or 0)
         if depth >= cfg["max"]:
             continue
-        if cfg["spend_gate"] == "rising_confidence":
+        # The spend gate applies to DEEPENING a case that is still open. It does not
+        # apply to re-examining an exclusion, where the number means the opposite: on
+        # a refuted case, confidence is confidence *in the refutation*, so the gate
+        # would skip exactly the exclusions worth challenging and fund the confident
+        # ones. Observed: a real vulnerability refuted at 0.0 — the least sure
+        # judgement in the whole run — was the one case the gate would not let back in.
+        retains = vocab.get(status, {}).get("retains_case", True)
+        if cfg["spend_gate"] == "rising_confidence" and retains:
             parent = by_id.get(h.get("parent") or "")
             if parent is not None and float(h.get("confidence", 0)) <= float(
                     parent.get("confidence", 0)):

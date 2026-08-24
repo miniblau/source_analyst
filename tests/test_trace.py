@@ -68,6 +68,20 @@ class TestTraceable(unittest.TestCase):
                hyp("h_b", parent="h_a", depth=1, confidence=0.8)]
         self.assertEqual([h["id"] for h in traceable(log, "needs_proof", CFG)], ["h_b"])
 
+    def test_the_spend_gate_does_not_block_re_examining_an_exclusion(self):
+        """On a refuted case the number is confidence *in the refutation*, so the gate
+        reads backwards: it would skip the shakiest exclusions and fund the confident
+        ones. Observed on a live run — a real vulnerability refuted at 0.0, the least
+        sure judgement in the whole pass, was the one case it would not let back in."""
+        log = [hyp("h_a", confidence=0.6),
+               hyp("h_b", parent="h_a", depth=1, confidence=0.0, status="refuted")]
+        self.assertEqual([h["id"] for h in traceable(log, "refuted", CFG)], ["h_b"])
+
+    def test_the_spend_gate_still_guards_a_case_that_is_open(self):
+        log = [hyp("h_a", confidence=0.6),
+               hyp("h_b", parent="h_a", depth=1, confidence=0.0)]
+        self.assertEqual(traceable(log, "needs_proof", CFG), [])
+
     def test_spend_gate_can_be_disabled(self):
         log = [hyp("h_a", confidence=0.7),
                hyp("h_b", parent="h_a", depth=1, confidence=0.4)]
