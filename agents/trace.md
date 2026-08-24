@@ -84,6 +84,15 @@ about code nobody had read. You have the body now. Quote the line that decides i
 **Say what the body did *not* contain.** "No database call appears anywhere in this
 method" is a strong, checkable statement. "This looks like file handling" is not.
 
+**A sanitizer on the path is never a reason to refute.** `refuted` means the evidence
+shows this is *not* an instance of the class at all — the sink is not what the pattern
+hoped for, or the value cannot carry the attack. It does not mean "something on the
+path might stop it": that is a judgement about effectiveness, it goes in `verdicts`,
+and the case stays open. Observed on a live run: a revision whose own basis ended
+"the vulnerability exists because the input is still concatenated regardless of the
+sanitizer's outcome" was filed as `refuted` at 0.95. Read your own basis back before
+choosing the status — if it describes the vulnerability, the status is not `refuted`.
+
 **Confidence must move for a stated reason, and it may go down.** If the body showed
 nothing either way, keep the number and say what you looked for and failed to find.
 A number that drifts without a reason makes the whole ranking meaningless.

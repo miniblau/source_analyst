@@ -314,6 +314,21 @@ def main(argv: list[str] | None = None) -> int:
                   "never examined and its argument type is "
                   + (f"`{arg_type}`, unresolved" if arg_type else "unknown")
                   + ". Treat this exclusion as unverified.\n")
+            # Derivable from the facts, so the renderer owes it — and it is the one
+            # warning that does NOT correlate with low confidence. Observed on a live
+            # traced run: a case was refuted at 0.95 whose own basis ended "the
+            # vulnerability exists because the input is still concatenated into the
+            # query string regardless of the sanitizer's outcome". The prose argued
+            # the bug and the status field said otherwise. Weakest-first ordering
+            # buries exactly that entry, so flag it on the evidence instead.
+            sanitized_path = any((by_id.get(fid, {}).get("candidate_count") or 0) > 0
+                                 for fid in h.get("evidence", []))
+            if sanitized_path:
+                w("  **Check this one.** The path carries a sanitizer candidate. Presence "
+                  "is a substrate fact; effectiveness is not, and no tool here can assert "
+                  "it. If this exclusion rests on that call working, it is a belief that "
+                  "was never recorded \u2014 and a confident refutation is not evidence "
+                  "of a careful one.\n")
             w(f"  <sub>Evidence: {', '.join(h.get('evidence', []))} \u00b7 {h.get('id','?')}"
               f" via {h.get('src','?')}</sub>\n")
         w("\n")
