@@ -471,6 +471,19 @@ class TestRenderSummary(unittest.TestCase):
         self.build([(0.2, "low", "refuted")])
         self.assertNotIn("Check this one.", self.render())
 
+    def test_inconclusive_cases_get_a_section_of_their_own(self):
+        """Neither a finding nor an exclusion. Without its own section such a case
+        appears as a number in the summary and nowhere else — investigated, retained,
+        and invisible."""
+        self.build([(0.4, "low", "inconclusive")])
+        out = self.render()
+        self.assertIn("Investigated, not settled", out)
+        self.assertIn("reason 0", out)
+
+    def test_no_inconclusive_section_when_everything_was_settled(self):
+        self.build([(0.9, "high", "needs_proof")])
+        self.assertNotIn("Investigated, not settled", self.render())
+
     def test_no_refuted_section_when_nothing_was_refuted(self):
         self.build([(0.9, "high", "needs_proof")])
         self.assertNotIn("Refuted during triage", self.render())

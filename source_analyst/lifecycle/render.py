@@ -83,6 +83,7 @@ def main(argv: list[str] | None = None) -> int:
     stale_findings = len(all_findings) - len(findings)
     hyps = [r for r in log if r.get("type") == "hypothesis" and r["id"] not in stale]
     refuted = [h for h in hyps if h.get("status") == "refuted"]
+    unsettled = [h for h in hyps if h.get("status") == "inconclusive"]
     beliefs = store.project()
     vc = load_class(args.vuln_class)
     tiers = tier_table()
@@ -257,6 +258,26 @@ def main(argv: list[str] | None = None) -> int:
         # traces to substrate facts by id.
         w(f"<sub>Evidence: {', '.join(h.get('evidence', []))} · "
           f"hypothesis {h.get('id','?')} via {h.get('src','?')} · finding via {f.get('src','?')}</sub>\n\n---\n\n")
+
+    if unsettled:
+        # A case the agent investigated and could not settle belongs to neither list:
+        # it is not written up as a finding and it was not excluded. Without a section
+        # of its own it appears only as a number in the summary and vanishes from the
+        # document — which is the silent incompleteness every other tool here refuses.
+        w("## Investigated, not settled \u2014 these need a human\n\n")
+        w(f"{len(unsettled)} case(s) were traced and came back `inconclusive`: the "
+          "substrate could not settle them either way, so the agent declined to call "
+          "them and declined to drop them. They produce no finding above and appear in "
+          "no exclusion list. They are the cases where reading the code was not "
+          "enough, which makes them the ones most worth your time.\n\n")
+        for h in sorted(unsettled, key=lambda x: site_of(x, by_id)):
+            conf = h.get("confidence")
+            why = str(h.get("reasoning") or h.get("basis") or "").strip()
+            w(f"- `{site_of(h, by_id)}` \u2014 **confidence {conf if conf is not None else '?'}**"
+              f" \u2014 {why or '(no reasoning recorded)'}\n")
+            w(f"  <sub>Evidence: {', '.join(h.get('evidence', []))} \u00b7 {h.get('id','?')}"
+              f" via {h.get('src','?')}</sub>\n")
+        w("\n")
 
     if refuted:
         w("## Refuted during triage \u2014 verify these\n\n")
