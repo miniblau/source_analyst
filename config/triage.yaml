@@ -1,0 +1,24 @@
+# Confidence bands for the report's opening summary (design §6).
+#
+# Presentation vocabulary, not a claim about the code: a band says how much of the
+# evidence the agent found intact, never how likely a bug is to be real. Bands are
+# ordered strongest-first and matched on `min` (inclusive); the last one must be 0.0
+# so every finding lands somewhere.
+#
+# Tune these freely — they change how a report reads, and nothing else.
+
+bands:
+  - name: strong
+    min: 0.85
+    guidance: resolved sink, non-literal argument, short readable path, no sanitizer
+              candidate — start here
+
+  - name: moderate
+    min: 0.7
+    guidance: one piece of that was missing; usually a sanitizer candidate on the
+              path or a longer inter-procedural hop
+
+  - name: weak
+    min: 0.0
+    guidance: several signals absent. Not "probably safe" — "the substrate could not
+              show much", which is a different sentence and often a tooling gap

@@ -8,13 +8,64 @@ not say is not said.
 from __future__ import annotations
 
 import argparse
+import os
 import sys
 from collections import Counter
+from pathlib import Path
+from typing import Any
+
+import yaml
 
 from ..belief import store
+from ..cpg.workspace import repo_root
 from ..manifest.loader import load_class, tier_table
 
 ORDER = {s: i for i, s in enumerate(("critical", "high", "medium", "low", "info"))}
+
+
+class RenderError(Exception):
+    """The report cannot be produced correctly. Always fatal — a report that is
+    quietly missing a section is worse than no report."""
+
+
+def bands() -> list[dict[str, Any]]:
+    env = os.environ.get("SOURCE_ANALYST_CONFIG")
+    base = Path(env).expanduser().resolve() if env else repo_root() / "config"
+    doc = yaml.safe_load((base / "triage.yaml").read_text())
+    rows = (doc or {}).get("bands")
+    if not rows:
+        raise RenderError("config/triage.yaml: expected a non-empty `bands` list")
+    rows = sorted(rows, key=lambda b: -float(b["min"]))
+    if float(rows[-1]["min"]) != 0.0:
+        raise RenderError("config/triage.yaml: the last band must have min 0.0, or a "
+                          "finding can fall through the summary and be omitted")
+    return rows
+
+
+def band_of(conf: Any, table: list[dict[str, Any]]) -> str:
+    """Which band a confidence falls in. A missing confidence is its own bucket —
+    silently filing it under the weakest band would invent a judgement."""
+    if not isinstance(conf, (int, float)):
+        return "unscored"
+    for b in table:
+        if float(conf) >= float(b["min"]):
+            return b["name"]
+    return "unscored"
+
+
+def site_of(rec: dict, by_id: dict[str, dict]) -> str:
+    """Where this is, taken from the evidence facts rather than from the `case`
+    string the agent wrote about itself (same discipline as `score`)."""
+    for fid in rec.get("evidence", []):
+        f = by_id.get(fid)
+        if not f or f.get("type") != "fact":
+            continue
+        file, line = f.get("sink_file"), f.get("sink_line")
+        if file is None:
+            file, line = f.get("file"), f.get("line")
+        if file is not None and line is not None:
+            return f"{file}:{line}"
+    return str(rec.get("case", "?"))
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -44,7 +95,46 @@ def main(argv: list[str] | None = None) -> int:
     w("> **What this is not.** Every finding below is static-only. "
       + " ".join(sorted({f.get("tier", "") for f in findings})).strip()
       + " means: " + "; ".join(sorted({tiers[f["tier"]]["claim"] for f in findings if f.get("tier") in tiers}))
-      + ". Nothing was executed against a running target, so no finding here is confirmed.\n\n---\n\n")
+      + ". Nothing was executed against a running target, so no finding here is confirmed.\n\n")
+
+    # ---- Triage summary -----------------------------------------------------
+    # Deterministic: counted off the log, never asked of a model. Confidence comes
+    # from the hypothesis the finding rests on, so the table reports how much of the
+    # evidence survived, not how likely a bug is to be real.
+    table = bands()
+    conf_of = {f["id"]: by_id.get(f.get("hypothesis"), {}).get("confidence") for f in findings}
+    grid: dict[str, Counter] = {}
+    for f in findings:
+        grid.setdefault(band_of(conf_of[f["id"]], table), Counter())[f.get("severity", "info")] += 1
+
+    sevs = sorted({f.get("severity", "info") for f in findings}, key=lambda s: ORDER.get(s, 9))
+    order = [b["name"] for b in table] + ["unscored"]
+    sites = {site_of(by_id.get(f.get("hypothesis"), {}), by_id) for f in findings}
+
+    w("## At a glance\n\n")
+    w(f"**{len(findings)} finding(s)** across **{len(sites)} distinct site(s)** \u2014 "
+      f"more findings than sites means several tainted parameters reach the same sink. "
+      f"**{len(refuted)}** further candidate(s) were refuted; they are listed at the end "
+      f"and are worth a look.\n\n")
+    if findings:
+        w("| confidence | " + " | ".join(sevs) + " | total |\n")
+        w("|---" * (len(sevs) + 2) + "|\n")
+        for name in [n for n in order if n in grid]:
+            row = grid[name]
+            spec = next((b for b in table if b["name"] == name), None)
+            label = f"**{name}**" + (f" (\u2265{spec['min']:g})" if spec else " (no confidence)")
+            w(f"| {label} | " + " | ".join(str(row.get(s, 0)) for s in sevs)
+              + f" | {sum(row.values())} |\n")
+        w("| **total** | " + " | ".join(str(sum(g.get(s, 0) for g in grid.values()))
+                                        for s in sevs) + f" | **{len(findings)}** |\n\n")
+        for b in table:
+            if b["name"] in grid:
+                w(f"- **{b['name']}** \u2014 {' '.join(str(b.get('guidance', '')).split())}\n")
+        if "unscored" in grid:
+            w("- **unscored** \u2014 the hypothesis carried no usable confidence. Unranked, "
+              "not low priority.\n")
+        w("\n")
+    w("---\n\n")
 
     for i, f in enumerate(findings, 1):
         h = by_id.get(f.get("hypothesis"), {})
@@ -69,11 +159,26 @@ def main(argv: list[str] | None = None) -> int:
           f"hypothesis {h.get('id','?')} via {h.get('src','?')} · finding via {f.get('src','?')}</sub>\n\n---\n\n")
 
     if refuted:
-        w("## Refuted during triage\n\n")
-        w("Reported by the substrate, judged not to be instances of this class. "
-          "Listed so the exclusion is reviewable rather than silent.\n\n")
-        for h in refuted:
-            w(f"- **{h.get('case','?')}** — {h.get('reasoning','')}\n")
+        w("## Refuted during triage \u2014 verify these\n\n")
+        w(f"The substrate found {len(refuted)} more tainted path(s) to a sink and the "
+          "agent judged each one not to be an instance of this class. Every exclusion "
+          "is listed with its reasoning so it can be checked rather than trusted.\n\n")
+        w("**Weakest refutations first.** The confidence shown is the agent's confidence "
+          "*in the refutation*, so the top of this list is where it was least sure it was "
+          "right to drop the case \u2014 which is exactly where to spend a few minutes. A "
+          "refusal here is a model judgement, not a substrate fact: the path itself was "
+          "proven.\n\n")
+        rows = sorted(
+            refuted,
+            key=lambda h: (h.get("confidence") if isinstance(h.get("confidence"), (int, float))
+                           else -1.0, site_of(h, by_id)))
+        for h in rows:
+            conf = h.get("confidence")
+            w(f"- `{site_of(h, by_id)}` \u2014 **confidence "
+              f"{conf if conf is not None else '?'}** \u2014 "
+              f"{h.get('reasoning', '(no reasoning recorded)')}\n"
+              f"  <sub>Evidence: {', '.join(h.get('evidence', []))} \u00b7 {h.get('id','?')}"
+              f" via {h.get('src','?')}</sub>\n")
         w("\n")
 
     if beliefs:

@@ -10,6 +10,8 @@ import subprocess
 import sys
 import tempfile
 import unittest
+
+import yaml
 from pathlib import Path
 
 from source_analyst import records
@@ -303,6 +305,103 @@ class TestChunking(unittest.TestCase):
         rows = self.rows()
         self.assertEqual(rows[0]["chunk"], {"index": 0, "of": 1, "rows": 5, "rows_total": 5})
         self.assertEqual(len([r for r in rows if r.get("kind") == "case"]), 5)
+
+
+class TestRenderSummary(unittest.TestCase):
+    """The opening triage table and the refuted list, both counted off the log."""
+
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(self.tmp.cleanup)
+        self.log = Path(self.tmp.name) / "log.jsonl"
+        self.env = dict(os.environ, SOURCE_ANALYST_LOG=str(self.log))
+
+    def build(self, specs):
+        """specs: (confidence, severity, status) -> log of facts/hypotheses/findings"""
+        recs = []
+        for i, (conf, sev, status) in enumerate(specs):
+            f = flow_fact(sink_line=20 + i, source_name=f"q{i}")
+            h = records.record("hypothesis", {
+                "statement": "s", "vuln_class": "sqli", "status": status,
+                "confidence": conf, "evidence": [f["id"]],
+                "case": "LIAR.java:999", "reasoning": f"reason {i}"}, src="agent:test")
+            recs += [f, h]
+            if status != "refuted":
+                recs.append(records.record("finding", {
+                    "hypothesis": h["id"], "title": f"t{i}", "tier": "static_reachability",
+                    "severity": sev, "recreation": "r", "refs": ["A.java:20"],
+                    "caveats": "c"}, src="agent:test"))
+        store.append(recs, self.log)
+
+    def render(self):
+        r = subprocess.run(
+            [sys.executable, "-m", "source_analyst.lifecycle.render", "--class", "sqli"],
+            cwd=ROOT, env=self.env, capture_output=True, text=True)
+        self.assertEqual(r.returncode, 0, r.stderr)
+        return r.stdout
+
+    def test_every_finding_lands_in_exactly_one_band(self):
+        """The summary's totals must equal the findings. A finding that falls
+        through the bands is a finding the reader never learns exists."""
+        self.build([(0.95, "high", "needs_proof"), (0.85, "high", "needs_proof"),
+                    (0.7, "medium", "needs_proof"), (0.1, "low", "needs_proof")])
+        out = self.render()
+        rows = [l for l in out.splitlines() if l.startswith("| ")]
+        totals = [int(l.rsplit("|", 2)[1].strip().strip("*"))
+                  for l in rows if "**total**" not in l and "confidence |" not in l
+                  and not l.startswith("|---")]
+        self.assertEqual(sum(totals), 4)
+        self.assertIn("| **total**", out)
+
+    def test_band_boundary_is_inclusive(self):
+        from source_analyst.lifecycle.render import band_of, bands
+        table = bands()
+        self.assertEqual(band_of(0.85, table), "strong")
+        self.assertEqual(band_of(0.8499, table), "moderate")
+        self.assertEqual(band_of(0.0, table), "weak")
+
+    def test_missing_confidence_is_unscored_not_weak(self):
+        """Filing a missing number under the lowest band would invent a judgement."""
+        from source_analyst.lifecycle.render import band_of, bands
+        self.assertEqual(band_of(None, bands()), "unscored")
+        self.assertEqual(band_of("high", bands()), "unscored")
+
+    def test_last_band_must_reach_zero(self):
+        from source_analyst.lifecycle import render
+        d = Path(self.tmp.name)
+        (d / "triage.yaml").write_text(
+            yaml.safe_dump({"bands": [{"name": "a", "min": 0.5}]}))
+        os.environ["SOURCE_ANALYST_CONFIG"] = str(d)
+        self.addCleanup(lambda: os.environ.pop("SOURCE_ANALYST_CONFIG", None))
+        with self.assertRaises(render.RenderError):
+            render.bands()
+
+    def test_refuted_are_listed_weakest_first(self):
+        """Least-confident refutation on top: that is where the model was least sure
+        it was right to drop a proven path, so it is where to look first."""
+        self.build([(0.99, "high", "refuted"), (0.5, "high", "refuted"),
+                    (0.75, "high", "refuted")])
+        out = self.render()
+        section = out.split("## Refuted during triage")[1]
+        confs = [float(l.split("**confidence ")[1].split("**")[0])
+                 for l in section.splitlines() if "**confidence " in l]
+        self.assertEqual(confs, sorted(confs), "weakest refutation must come first")
+
+    def test_refuted_site_comes_from_evidence_not_the_agents_prose(self):
+        """Same discipline as `score`: the agent wrote 'LIAR.java:999' in `case`."""
+        self.build([(0.9, "high", "refuted")])
+        section = self.render().split("## Refuted during triage")[1]
+        self.assertIn("A.java:20", section)
+        self.assertNotIn("LIAR.java", section)
+
+    def test_refuted_carry_evidence_ids_for_tracing(self):
+        self.build([(0.9, "high", "refuted")])
+        section = self.render().split("## Refuted during triage")[1]
+        self.assertIn("Evidence: f_", section)
+
+    def test_no_refuted_section_when_nothing_was_refuted(self):
+        self.build([(0.9, "high", "needs_proof")])
+        self.assertNotIn("Refuted during triage", self.render())
 
 
 class TestPromptHygiene(unittest.TestCase):

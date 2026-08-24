@@ -96,6 +96,23 @@ immediately found a second instance: `seed` in `agents/hypothesize.md`.) The gen
 lesson: **a prompt and a grammar that disagree fail silently**, so the agreement has to be
 checked mechanically rather than by reading both.
 
+**Report opens with triage, and closes with what it dropped — 2026-08-24.** `render`
+now leads with an *At a glance* table: findings bucketed by confidence band against
+severity, plus the count of distinct sites (more findings than sites means several
+tainted parameters reach one sink). Bands live in `config/triage.yaml` like every other
+vocabulary; the last band must have `min: 0.0` or `render` refuses, because a finding
+that falls through the summary is a finding the reader never learns exists. A missing
+confidence is its own `unscored` bucket rather than being filed under the weakest band,
+which would invent a judgement.
+
+The refuted section is written for verification, not for the record. Exclusions are
+listed **weakest refutation first** — the confidence shown is the agent's confidence *in
+the refutation*, so the top of the list is where it was least sure it was right to drop a
+path the substrate had already proven. Each carries its reasoning and its evidence ids,
+and the site comes from the evidence facts rather than the `case` string the agent wrote
+about itself (the same discipline `score` uses). A refutation is a model judgement; the
+path underneath it is a fact, and the two must not be allowed to blur.
+
 **Known limit, load-bearing.** `reachableByFlows` enumerates *representative* paths, not
 all routes (proven on WebGoat Lesson8: the clean 61→62 route is never returned). No tool
 may therefore claim a flow is sanitized, and none does — `sanitizer_on_path` reports
