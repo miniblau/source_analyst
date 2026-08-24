@@ -123,6 +123,26 @@ def project(path: Path | None = None) -> dict[tuple[str, str, str], dict[str, An
     return out
 
 
+def site_of(rec: dict[str, Any], facts: dict[str, dict[str, Any]]) -> str | None:
+    """Which sink site a hypothesis is about, taken from its EVIDENCE FACTS.
+
+    Never from the `case` string an agent wrote about itself: that is the model
+    describing its own answer, and grading or grouping on it would let a confident
+    mislabel pass. Returns None when the evidence locates nothing — callers decide
+    what that means, and they do not all agree, which is why this does not guess.
+    """
+    for fid in rec.get("evidence", []):
+        f = facts.get(fid)
+        if not f or f.get("type") != "fact":
+            continue
+        file, line = f.get("sink_file"), f.get("sink_line")
+        if file is None:
+            file, line = f.get("file"), f.get("line")
+        if file is not None and line is not None:
+            return f"{file}:{line}"
+    return None
+
+
 def revised_hypotheses(log: list[dict[str, Any]]) -> set[str]:
     """Ids of hypotheses a later revision has replaced — every id named as a `parent`.
 

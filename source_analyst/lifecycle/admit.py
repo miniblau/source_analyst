@@ -113,6 +113,25 @@ def check_trace(obj: dict, log_recs: dict[str, dict], dynamic: bool,
             f"fork the chain, and the leaf projection every report and scorecard reads "
             f"cannot express a fork")
 
+    # A revision must still be about the same case. `score` and `render` locate a
+    # hypothesis from its evidence facts, and a callee_body carries `file` but no
+    # `line`, so a revision citing only bodies resolves to no site at all: it would
+    # be dropped as unlabelled by the scorecard and headed `?` in the report, while
+    # looking perfectly well-formed here. Losing the anchor is silent; refusing is not.
+    facts_by_id = {k: v for k, v in log_recs.items() if v.get("type") == "fact"}
+    parent_site = store.site_of(parent, facts_by_id)
+    if parent_site is not None:
+        site = store.site_of(obj, facts_by_id)
+        if site is None:
+            raise AdmitError(
+                "trace revision cites no fact that locates a sink site — carry the "
+                "parent's evidence forward alongside the callee bodies, or the case "
+                "cannot be scored or reported against the code it is about")
+        if site != parent_site:
+            raise AdmitError(
+                f"trace revision is about {site} but its parent is about {parent_site} "
+                f"— a revision refines one case, it does not move to another")
+
     # What the agent was actually shown: the callee bodies among its own cited facts.
     # A verdict about anything else is a judgement of code that was never read, which
     # is the failure this whole leg was built to end.

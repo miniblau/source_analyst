@@ -54,18 +54,10 @@ def band_of(conf: Any, table: list[dict[str, Any]]) -> str:
 
 
 def site_of(rec: dict, by_id: dict[str, dict]) -> str:
-    """Where this is, taken from the evidence facts rather than from the `case`
-    string the agent wrote about itself (same discipline as `score`)."""
-    for fid in rec.get("evidence", []):
-        f = by_id.get(fid)
-        if not f or f.get("type") != "fact":
-            continue
-        file, line = f.get("sink_file"), f.get("sink_line")
-        if file is None:
-            file, line = f.get("file"), f.get("line")
-        if file is not None and line is not None:
-            return f"{file}:{line}"
-    return str(rec.get("case", "?"))
+    """Where this is, from the evidence facts. Only a *report* falls back to the
+    agent's own `case` string — a heading has to say something, whereas `score` must
+    not grade a site the model merely asserted."""
+    return store.site_of(rec, by_id) or str(rec.get("case", "?"))
 
 
 def main(argv: list[str] | None = None) -> int:

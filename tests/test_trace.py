@@ -301,6 +301,24 @@ class TestAdmitTrace(unittest.TestCase):
         self.assertIn("already has a revision", r.stderr)
         self.assertEqual([h for h in self.records_of("hypothesis") if h.get("parent")], [])
 
+    def test_a_revision_that_drops_the_site_anchor_is_refused(self):
+        """`score` and `render` locate a hypothesis from its evidence facts, and a
+        callee_body carries `file` but no `line`. A revision citing only bodies
+        resolves to no site: dropped as unlabelled by the scorecard, headed `?` in
+        the report, and perfectly well-formed on the way in."""
+        r = self.run_admit(self.rev(evidence=[self.body["id"]]))
+        self.assertNotEqual(r.returncode, 0)
+        self.assertIn("locates a sink site", r.stderr)
+
+    def test_a_revision_may_not_move_to_another_case(self):
+        other = records.fact(
+            {"kind": "flow", "subject": "p.D.h:R(S)", "object": "p.D.q:R(S)",
+             "sink_file": "B.java", "sink_line": 99}, "cpg:reachable")
+        store.append([other], self.log)
+        r = self.run_admit(self.rev(evidence=[other["id"], self.body["id"]]))
+        self.assertNotEqual(r.returncode, 0)
+        self.assertIn("does not move to another", r.stderr)
+
     def test_hallucinated_evidence_is_still_rejected(self):
         r = self.run_admit(self.rev(evidence=["f_" + "0" * 24]))
         self.assertNotEqual(r.returncode, 0)

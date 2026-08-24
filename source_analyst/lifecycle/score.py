@@ -183,18 +183,7 @@ def statuses() -> dict[str, dict[str, Any]]:
     return doc
 
 
-def site_of(rec: dict, facts: dict[str, dict]) -> str | None:
-    """Which sink site a hypothesis is about, taken from its evidence facts."""
-    for fid in rec.get("evidence", []):
-        f = facts.get(fid)
-        if not f:
-            continue
-        file, line = f.get("sink_file"), f.get("sink_line")
-        if file is None:
-            file, line = f.get("file"), f.get("line")
-        if file is not None and line is not None:
-            return f"{file}:{line}"
-    return None
+site_of = store.site_of
 
 
 def score(log: list[dict], truth: dict, vuln_class: str, src: str | None) -> dict[str, Any]:
