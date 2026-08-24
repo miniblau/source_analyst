@@ -34,7 +34,7 @@ from typing import Any
 import yaml
 
 from .. import records
-from ..cpg.workspace import repo_root, var_root
+from ..cpg.workspace import private_dir, private_file, repo_root, var_root
 
 PLACEHOLDERS = ("agent", "model", "prompt", "repo")
 
@@ -188,13 +188,15 @@ def main(argv: list[str] | None = None) -> int:
     # and out, so a surprising hypothesis can be traced to what the model was
     # actually shown. It stays out of log.jsonl — it is not a fact.
     run_id = records.ulid()
-    tdir = transcript_dir()
-    tdir.mkdir(parents=True, exist_ok=True)
+    # Owner-only: a transcript is the whole briefing verbatim, which is client
+    # source code plus whatever the model said about it.
+    tdir = private_dir(transcript_dir())
     transcript = tdir / f"{run_id}.{args.agent}.txt"
     transcript.write_text(
         f"# runner: {name}\n# argv: {json.dumps(cmd)}\n# rc: {proc.returncode}\n"
         f"# elapsed_s: {elapsed}\n\n===== STDIN =====\n{payload}\n"
         f"===== STDOUT =====\n{proc.stdout}\n===== STDERR =====\n{proc.stderr}\n")
+    private_file(transcript)
 
     objs, junk = extract(proc.stdout)
     meta = {"cmd": "run_agent", "runner": name, "agent": args.agent, "model": spec.get("model"),

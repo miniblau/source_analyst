@@ -16,6 +16,32 @@ from pathlib import Path
 SKIP_DIRS = {".git"}
 KEY_LEN = 16
 
+# This tool ingests client source and writes it back out: the log holds code
+# excerpts, agent transcripts hold whole briefings verbatim, and the CPG holds
+# the tree. Default 0644/0755 makes all of that readable by every account on the
+# box — wrong for material that is usually under NDA, and free to fix.
+DIR_MODE = 0o700
+FILE_MODE = 0o600
+
+
+def private_dir(path: Path) -> Path:
+    """mkdir -p, owner-only. chmod after the fact because umask masks mode=."""
+    path.mkdir(parents=True, exist_ok=True)
+    try:
+        os.chmod(path, DIR_MODE)
+    except OSError:
+        pass  # a mode we cannot set is not a reason to fail the run
+    return path
+
+
+def private_file(path: Path) -> Path:
+    """Tighten an existing file to owner-only."""
+    try:
+        os.chmod(path, FILE_MODE)
+    except OSError:
+        pass
+    return path
+
 
 def repo_root() -> Path:
     return Path(__file__).resolve().parents[2]

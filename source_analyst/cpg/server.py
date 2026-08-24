@@ -7,9 +7,11 @@ rebuild. Nothing here reasons about code; it moves Scala in and JSON out.
 
 from __future__ import annotations
 
+import base64
 import json
 import os
 import re
+import secrets
 import shutil
 import signal
 import socket
@@ -20,7 +22,7 @@ import urllib.error
 import urllib.request
 from pathlib import Path
 
-from .workspace import Workspace
+from .workspace import Workspace, private_dir, private_file
 
 JOERN = os.environ.get("JOERN_BIN", "joern")
 JOERN_PARSE = os.environ.get("JOERN_PARSE_BIN", "joern-parse")
@@ -76,7 +78,7 @@ def build(
         return False
     if is_running(ws):
         stop(ws)
-    ws.root.mkdir(parents=True, exist_ok=True)
+    private_dir(ws.root)
     tmp = ws.root / "cpg.bin.tmp"
     tmp.unlink(missing_ok=True)
     cmd = [JOERN_PARSE, str(ws.src), "--output", str(tmp)]
@@ -145,11 +147,43 @@ def _free_port() -> int:
         return s.getsockname()[1]
 
 
-def _post(port: int, code: str, timeout: int) -> dict:
+# The CPGQL server evaluates arbitrary Scala, so an unauthenticated one is a local
+# remote-code-execution endpoint that stays open for the length of a review — any
+# process on the box can drive it. Binding to loopback is not enough on a shared
+# host, a build agent, or a laptop running someone else's postinstall script. Joern
+# takes basic auth; a per-workspace random credential costs nothing.
+AUTH_USER = "source_analyst"
+
+
+def _auth_file(ws: Workspace) -> Path:
+    return ws.root / "server.auth"
+
+
+def _read_auth(ws: Workspace) -> str | None:
+    try:
+        return _auth_file(ws).read_text().strip() or None
+    except OSError:
+        return None
+
+
+def _new_auth(ws: Workspace) -> str:
+    secret = secrets.token_urlsafe(32)
+    private_dir(ws.root)
+    f = _auth_file(ws)
+    f.write_text(secret + "\n")
+    private_file(f)
+    return secret
+
+
+def _post(port: int, code: str, timeout: int, secret: str | None = None) -> dict:
+    headers = {"Content-Type": "application/json"}
+    if secret:
+        token = base64.b64encode(f"{AUTH_USER}:{secret}".encode()).decode()
+        headers["Authorization"] = f"Basic {token}"
     req = urllib.request.Request(
         f"http://127.0.0.1:{port}/query-sync",
         data=json.dumps({"query": code}).encode(),
-        headers={"Content-Type": "application/json"},
+        headers=headers,
         method="POST",
     )
     with urllib.request.urlopen(req, timeout=timeout) as resp:
@@ -168,6 +202,7 @@ def ensure_server(ws: Workspace, timeout: int = START_TIMEOUT) -> int:
     ws.pid_file.unlink(missing_ok=True)
     ws.port_file.unlink(missing_ok=True)
     port = _free_port()
+    secret = _new_auth(ws)
     cmd = [
         JOERN,
         "--server",
@@ -175,6 +210,10 @@ def ensure_server(ws: Workspace, timeout: int = START_TIMEOUT) -> int:
         "127.0.0.1",
         "--server-port",
         str(port),
+        "--server-auth-username",
+        AUTH_USER,
+        "--server-auth-password",
+        secret,
         "--nocolors",
         str(ws.cpg_bin),
     ]
@@ -194,7 +233,7 @@ def ensure_server(ws: Workspace, timeout: int = START_TIMEOUT) -> int:
                 f"cpg: joern server exited ({proc.returncode}) during load; see {ws.server_log}"
             )
         try:
-            _post(port, "1", timeout=10)
+            _post(port, "1", timeout=10, secret=secret)
             log(f"server ready (pid {proc.pid}, port {port})")
             return port
         except (urllib.error.URLError, OSError, TimeoutError, json.JSONDecodeError):
@@ -227,6 +266,7 @@ def stop(ws: Workspace) -> bool:
         log(f"stopped server pid {pid}")
     ws.pid_file.unlink(missing_ok=True)
     ws.port_file.unlink(missing_ok=True)
+    _auth_file(ws).unlink(missing_ok=True)
     return stopped
 
 
@@ -247,8 +287,10 @@ def run_scala(ws: Workspace, code: str, timeout: int = QUERY_TIMEOUT) -> str:
     Callers decide success by whether the query produced its output file.
     """
     port = ensure_server(ws)
+    # None when the server predates this credential or was started by hand: Joern
+    # ignores the header it did not ask for, so an older warm server keeps working.
     try:
-        resp = _post(port, code, timeout=timeout)
+        resp = _post(port, code, timeout=timeout, secret=_read_auth(ws))
     except urllib.error.URLError as e:
         raise SystemExit(f"cpg: query transport failed on port {port}: {e}")
     return strip_ansi(resp.get("stdout") or "")

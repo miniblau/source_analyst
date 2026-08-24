@@ -20,7 +20,7 @@ from typing import Any, Iterator
 import yaml
 
 from .. import records
-from ..cpg.workspace import repo_root, var_root
+from ..cpg.workspace import private_dir, private_file, repo_root, var_root
 
 REQUIRED_ENVELOPE = ("v", "type", "id", "ts", "src")
 
@@ -101,12 +101,16 @@ def append(recs: list[dict[str, Any]], path: Path | None = None) -> tuple[int, i
         fresh.append(rec)
 
     if fresh:
-        p.parent.mkdir(parents=True, exist_ok=True)
+        # Owner-only: the log carries code excerpts from the tree under review.
+        private_dir(p.parent)
+        existed = p.exists()
         # One write of whole lines in append mode: concurrent writers interleave
         # records, never fragments of one.
         with p.open("a") as fh:
             fh.write("".join(
                 json.dumps(r, ensure_ascii=False, separators=(",", ":")) + "\n" for r in fresh))
+        if not existed:
+            private_file(p)
     return len(fresh), dupes
 
 

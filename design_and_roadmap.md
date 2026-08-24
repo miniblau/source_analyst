@@ -14,7 +14,8 @@ read → understand → hypothesize → branch → prove. LLM agents orchestrate
 deterministic substrate (Joern-centric) supplies ground truth; an append-only memory
 accretes facts, hypotheses, trust decisions, and findings.
 
-**Status.** Design frozen (§10). Phase 0 in progress. `cpg` (Joern) and `struct_grep`
+**Status.** Design frozen (§10). **Phase 0 complete; Phase 1 complete and proven on a
+local model.** `cpg` (Joern) and `struct_grep`
 (opengrep) both emit facts; SQLi is validated on WebGoat from both substrates and their
 sink inventories agree exactly. The dataflow spine is in: `request_sources` → `reachable`
 → `sanitizer_on_path` narrow 39 WebGoat sink candidates to 16 sites with a proven flow,
@@ -198,8 +199,15 @@ repo/
     patterns/<lang>/        # per-language sink/source/sanitizer patterns
   queries/                 # named Joern .sc scripts (§10.3) — fixed vocabulary
   rules/<lang>/            # named opengrep rule sets (§10.3) — fixed vocabulary
-  config/                  # vocabulary as data: tiers, verdicts, statuses, languages,
-                           #   runners (the ONLY file that may name a model or provider)
+  config/                  # vocabulary as data — nothing here is code:
+                           #   tiers.yaml       verification tiers (§6)
+                           #   hypothesis.yaml  lifecycle statuses (§4)
+                           #   verdicts.yaml    belief verdicts (§5)
+                           #   languages.yaml   extension → language (§10.2)
+                           #   triage.yaml      report confidence bands
+                           #   calibration.yaml signals `score` correlates confidence with
+                           #   runners.yaml     the ONLY file that may name a model/provider
+                           #   schemas/         per-agent constrained-decoding schemas
   source_analyst/          # single-purpose CLIs: cpg, struct_grep, manifest, belief,
                            #   brief, run_agent, admit, render, score — all deterministic
   agents/                  # agent prompts: hypothesize, report (orchestrator, trace, … later)

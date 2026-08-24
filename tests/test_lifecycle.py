@@ -532,6 +532,57 @@ class TestRefutationBasis(unittest.TestCase):
         self.assertIn("unverified", out)
 
 
+class TestEmptyReportIsNotACleanBill(unittest.TestCase):
+    """Invariant #8 at the last mile. Every tool refuses to let zero results read
+    as "nothing here"; the document a human actually reads is the one place that
+    mistake is expensive, and it was the one place not doing it."""
+
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(self.tmp.cleanup)
+        self.log = Path(self.tmp.name) / "log.jsonl"
+        self.env = dict(os.environ, SOURCE_ANALYST_LOG=str(self.log))
+        self.log.touch()
+
+    def render(self):
+        r = subprocess.run(
+            [sys.executable, "-m", "source_analyst.lifecycle.render", "--class", "sqli"],
+            cwd=ROOT, env=self.env, capture_output=True, text=True)
+        self.assertEqual(r.returncode, 0, r.stderr)
+        return r.stdout
+
+    def test_empty_log_says_nothing_was_analysed(self):
+        out = self.render()
+        self.assertIn("not the same as a clean result", out)
+        self.assertIn("Nothing was analysed", out)
+        self.assertNotIn("means: .", out, "the tier sentence must not render malformed")
+
+    def test_facts_without_hypotheses_says_nothing_was_judged(self):
+        store.append([flow_fact()], self.log)
+        self.assertIn("Nothing was judged", self.render())
+
+    def test_all_refuted_is_called_out_as_the_false_negative_shape(self):
+        f = flow_fact()
+        h = records.record("hypothesis", {
+            "statement": "s", "vuln_class": "sqli", "status": "refuted",
+            "confidence": 0.9, "evidence": [f["id"]], "reasoning": "no"}, src="agent:t")
+        store.append([f, h], self.log)
+        out = self.render()
+        self.assertIn("Every candidate was refuted", out)
+        self.assertIn("false-negative", out)
+
+    def test_hypotheses_without_findings_says_not_written_up(self):
+        f = flow_fact()
+        h = records.record("hypothesis", {
+            "statement": "s", "vuln_class": "sqli", "status": "needs_proof",
+            "confidence": 0.9, "evidence": [f["id"]]}, src="agent:t")
+        store.append([f, h], self.log)
+        self.assertIn("Judged but not written up", self.render())
+
+    def test_silence_is_never_offered_as_safety(self):
+        self.assertIn("None of these is evidence that the code is safe", self.render())
+
+
 class TestPromptHygiene(unittest.TestCase):
     """Over-fitting guard (§8): agents learn the class from the manifest, never
     from their own prompt. A prompt naming a class would not survive class #2."""

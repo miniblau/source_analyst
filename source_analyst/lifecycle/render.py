@@ -85,16 +85,25 @@ def main(argv: list[str] | None = None) -> int:
 
     findings.sort(key=lambda f: (ORDER.get(f.get("severity", "info"), 9), f.get("title", "")))
     counts = Counter(f.get("severity") for f in findings)
+    facts = Counter(r.get("kind", "?") for r in log if r.get("type") == "fact")
+    by_status = Counter(h.get("status", "?") for h in hyps)
 
     w = sys.stdout.write
     w(f"# {vc.title} — review of {args.target}\n\n")
-    w(f"{len(findings)} finding(s): "
-      + ", ".join(f"{n} {s}" for s, n in sorted(counts.items(), key=lambda kv: ORDER.get(kv[0], 9)))
-      + f". {len(refuted)} candidate(s) refuted during triage.\n\n")
+    if findings:
+        w(f"{len(findings)} finding(s): "
+          + ", ".join(f"{n} {s}"
+                      for s, n in sorted(counts.items(), key=lambda kv: ORDER.get(kv[0], 9)))
+          + f". {len(refuted)} candidate(s) refuted during triage.\n\n")
+    else:
+        w("**No findings — and that is not the same as a clean result.**\n\n")
     w(f"> **What this is.** {vc.narrative}\n\n")
+    # With no findings there are no tiers to describe, so fall back to the class
+    # ceiling — otherwise this sentence renders as "static-only.  means: .".
+    shown = sorted({f["tier"] for f in findings if f.get("tier") in tiers}) or [vc.max_static_tier]
     w("> **What this is not.** Every finding below is static-only. "
-      + " ".join(sorted({f.get("tier", "") for f in findings})).strip()
-      + " means: " + "; ".join(sorted({tiers[f["tier"]]["claim"] for f in findings if f.get("tier") in tiers}))
+      + " ".join(shown)
+      + " means: " + "; ".join(tiers[x]["claim"] for x in shown if x in tiers)
       + ". Nothing was executed against a running target, so no finding here is confirmed."
       + " The dataflow engine enumerates *representative* paths, not every route, so the"
       + " paths quoted below are examples rather than an inventory.\n\n")
@@ -114,10 +123,40 @@ def main(argv: list[str] | None = None) -> int:
     sites = {site_of(by_id.get(f.get("hypothesis"), {}), by_id) for f in findings}
 
     w("## At a glance\n\n")
-    w(f"**{len(findings)} finding(s)** across **{len(sites)} distinct site(s)** \u2014 "
-      f"more findings than sites means several tainted parameters reach the same sink. "
-      f"**{len(refuted)}** further candidate(s) were refuted; they are listed at the end "
-      f"and are worth a look.\n\n")
+    if findings:
+        w(f"**{len(findings)} finding(s)** across **{len(sites)} distinct site(s)**"
+          + (" \u2014 more findings than sites means several tainted parameters reach the "
+             "same sink." if len(findings) > len(sites) else ".")
+          + (f" **{len(refuted)}** further candidate(s) were refuted; they are listed at "
+             f"the end and are worth a look." if refuted else "")
+          + "\n\n")
+    else:
+        # Invariant #8 at the last mile. Every tool in this repo refuses to let zero
+        # results read as "nothing here"; the report a human actually reads must do
+        # the same, and it is the one place the mistake is expensive.
+        w("Zero findings has several meanings and only the numbers say which:\n\n")
+        w(f"- substrate facts in this log: **{sum(facts.values())}**"
+          + (f" ({', '.join(f'{n} {k}' for k, n in sorted(facts.items()))})" if facts else "")
+          + "\n")
+        w(f"- hypotheses: **{len(hyps)}**"
+          + (f" ({', '.join(f'{n} {s}' for s, n in sorted(by_status.items()))})"
+             if hyps else "") + "\n\n")
+        if not facts:
+            w("**Nothing was analysed.** No query has written a fact to this log, so this "
+              "document reports on nothing at all. Run the substrate queries first.\n\n")
+        elif not hyps:
+            w("**Nothing was judged.** The substrate found candidates and no agent has "
+              "assessed them. Run the hypothesize pass.\n\n")
+        elif len(refuted) == len(hyps):
+            w("**Every candidate was refuted.** The substrate did find paths; an agent "
+              "judged all of them not to be instances of this class. Those judgements are "
+              "listed below and are exactly what to check \u2014 this is the shape a "
+              "false-negative run takes.\n\n")
+        else:
+            w("**Judged but not written up.** Hypotheses survived triage and no finding "
+              "was produced from them. Run the report pass.\n\n")
+        w("None of these is evidence that the code is safe. A sink shape no query can "
+          "reach produces the same silence as a clean tree.\n\n")
     if findings:
         w("| confidence | " + " | ".join(sevs) + " | total |\n")
         w("|---" * (len(sevs) + 2) + "|\n")
