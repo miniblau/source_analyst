@@ -75,6 +75,13 @@ budget against **~2.3 chars per token**, not 4, because source and fully-qualifi
 identifiers tokenize far worse than prose. Getting this wrong is a batch that dies
 mid-record on the context limit.
 
+**Measured caveat, 2026-08-24.** On WebGoat SQLi with a 30B local model, tracing held
+precision at 1.0 and dropped recall from **1.0 to 0.696** — seven real vulnerabilities
+refuted after the agent read the code that it had flagged correctly before. Use `trace`
+to read bodies, kill name-based refutations and earn beliefs; do **not** yet trust it to
+narrow a list. Everything it drops lands in the report's "Refuted — verify these"
+section, flagged, which is where you check it.
+
 Depth is bounded by `config/depth.yaml`: a hard `max`, and a `spend_gate` that
 descends only where the last level made the case *stronger*. The null baseline keeps
 confidence flat and so cannot buy itself another level, which is the property that

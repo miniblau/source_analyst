@@ -765,6 +765,38 @@ else. Formatting belongs to the grammar, and where a model's prose and its field
 disagree, only the fields can be checked — so the expensive ones are made unreachable
 rather than merely discouraged.
 
+### The first complete traced run (2026-08-24) — a regression, measured
+
+`var/webgoat.live.log.jsonl`, same 348-fact substrate as the flat pass, 23 cases traced
+to depth 1, 35 callee bodies read (27 resolved, 8 external stubs), 14 belief records
+projecting to 4 live keys.
+
+| | flat pass | after tracing |
+|---|---|---|
+| precision | 1.0 | 1.0 |
+| recall | **1.0** | **0.696** |
+| site_recall | 1.0 | 0.846 |
+| confidence stdev | 0.106 | 0.086 |
+
+**Reading the code made the agent worse.** Seven real vulnerabilities it had flagged
+correctly with *less* information were refuted after it read the callee bodies — six at
+0.95 confidence, all on the two sanitizer lessons. Precision never moved: it kept
+nothing it should not have, it dropped things it should have kept.
+
+The gates hold either way — nothing false was admitted, every finding traces to facts —
+and the human safety net does its job: all seven appear in the report's "Refuted —
+verify these" section, flagged, with reasoning that visibly describes the vulnerability
+the status field denies. But `trace` is **not yet safe to narrow with** on this model.
+Use it for what it demonstrably does well: reading bodies, killing name-based
+refutations, and earning beliefs.
+
+The one unambiguous win is the belief store. Asked to audit
+`SqlInjectionLesson8.log`, the agent derived from the source that
+`action.replace('\'', '"')` cannot save a value concatenated into an `INSERT`, and
+recorded `unsound` — independently reaching the exact counter-example §10 cites as the
+reason no tool may claim a flow is sanitized. That verdict now sits in the store so no
+later run re-litigates it.
+
 Not yet built: the `checkpoint` agent (the human-in-loop depth gate, §4.2 — the value
 is in `config/depth.yaml` and read by nothing; a run today is bounded by `max` and the
 spend gate alone), and re-tracing at `--status refuted` has the machinery but has not
