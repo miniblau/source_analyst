@@ -2,8 +2,8 @@
 # The trace loop: read the code, re-judge, descend (design §4.1, §4.2).
 #
 #   tools/trace.sh <src> <class> <lang> [batch] [status]
-#   tools/trace.sh corpus/webgoat sqli java 3
-#   tools/trace.sh corpus/webgoat sqli java 3 refuted   # re-examine the exclusions
+#   tools/trace.sh corpus/webgoat sqli java
+#   tools/trace.sh corpus/webgoat sqli java 1 refuted   # re-examine the exclusions
 #
 # This is the only loop in the system. Everything else is single-shot, which is what
 # keeps iteration in one auditable place.
@@ -35,7 +35,10 @@ set -euo pipefail
 src="${1:?source tree, e.g. corpus/webgoat}"
 class="${2:?vuln class}"
 lang="${3:?language}"
-size="${4:-3}"
+# 1, not 4 as the flat pass uses: a trace briefing carries method source and runs
+# ~10k tokens per case. Three cases put it at ~15k against a 16384 context, which is
+# how the first live run died mid-record.
+size="${4:-1}"
 status="${5:-needs_proof}"
 
 # A loop that cannot terminate is worse than a slow one. Every turn must admit at
