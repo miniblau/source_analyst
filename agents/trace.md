@@ -64,6 +64,9 @@ One JSON object per `trace_case`, in the order given, nothing else on stdout:
 - `parent` — the `hypothesis.id` you were given. `admit` rejects an id it cannot find.
 - `evidence` — the fact ids you relied on, **including the callee bodies you read**.
   A revision argued from a body that is not cited is a claim with no provenance.
+  **Also keep the ids from the case's own `evidence`.** Those are what locate this
+  case in the code; a callee body alone does not, and `admit` refuses a revision that
+  cannot be tied back to the sink site it is about.
 - `status` — `needs_proof`, `refuted` or `inconclusive`. `confirmed` is impossible in
   a static run and will be rejected.
 - `confidence` — 0..1, for the case *as it now stands*.
