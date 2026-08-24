@@ -418,6 +418,17 @@ def main(argv: list[str] | None = None) -> int:
 
     if args.agent == "hypothesize":
         rows = _cases(log)
+        # Already judged. This leg reads cases off FACTS, so nothing removed a case
+        # once a hypothesis existed for it: re-running the pass — after an
+        # interruption, or just twice — wrote a second hypothesis for every case, and
+        # hypotheses are ULID events so nothing dedupes them. `score` then counts one
+        # site twice and calibration gets duplicate points.
+        #
+        # To compare two models, give each its own log. That is what `--src` filtering
+        # cannot do for you once both have written to the same one.
+        judged = {e for h in log if h.get("type") == "hypothesis"
+                  for e in h.get("evidence", [])}
+        rows = [r for r in rows if not (set(r["evidence"]) & judged)]
         if args.limit:
             rows = rows[:args.limit]
         header["status_filter"] = None
@@ -463,7 +474,11 @@ def main(argv: list[str] | None = None) -> int:
         header["status_filter"] = args.status
 
     total = len(rows)
-    n_chunks = 1 if args.chunk_size is None else max(1, -(-total // args.chunk_size))
+    # Chunked: 0 when nothing is left, so a driver drains by looping until this reaches
+    # zero — `max(1, ...)` would make an exhausted queue look like one more batch.
+    # Unchunked: always one batch, even an empty one, because that caller asked for the
+    # whole selection and an empty selection is an answer.
+    n_chunks = 1 if args.chunk_size is None else -(-total // args.chunk_size)
     if args.chunks:
         # A driver needs the batch count before it can loop. Deliberately on stdout
         # and nothing else, so `for i in $(seq 0 $(($(brief ... --chunks) - 1)))`
