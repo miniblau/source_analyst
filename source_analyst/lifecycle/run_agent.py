@@ -199,7 +199,9 @@ def main(argv: list[str] | None = None) -> int:
     private_file(transcript)
 
     objs, junk = extract(proc.stdout)
-    meta = {"cmd": "run_agent", "runner": name, "agent": args.agent, "model": spec.get("model"),
+    # "" not null: a runner that names no model has an empty one, it is not missing.
+    meta = {"cmd": "run_agent", "runner": name, "agent": args.agent,
+            "model": str(spec.get("model", "")),
             "rc": proc.returncode, "elapsed_s": elapsed, "records": len(objs),
             "discarded_lines": len(junk), "run_id": run_id, "transcript": str(transcript)}
 

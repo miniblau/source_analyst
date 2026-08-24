@@ -57,7 +57,20 @@ def _cases(log: list[dict]) -> list[dict]:
     checks = {_key(f): f for f in log if f.get("kind") == "sanitizer_check"}
     # A sink inventory entry lets a case say whether the statement text was
     # runtime-built, which `reachable` alone does not carry.
-    sinks = {(f.get("file"), f.get("line")): f for f in log if f.get("kind") == "sink_candidate"}
+    #
+    # BOTH substrates emit `sink_candidate` at the same file:line — opengrep rules
+    # declare that kind too — and the design encourages both to accrete into one
+    # log. A plain last-wins dict therefore lets an opengrep fact (which has no
+    # `arg_is_literal`) displace the CPG one, silently dropping the field on every
+    # case. Prefer whichever record actually carries what this case will read.
+    sinks: dict[tuple, dict] = {}
+    for f in log:
+        if f.get("kind") != "sink_candidate":
+            continue
+        key = (f.get("file"), f.get("line"))
+        prev = sinks.get(key)
+        if prev is None or ("arg_is_literal" not in prev and "arg_is_literal" in f):
+            sinks[key] = f
 
     out = []
     for key, flow in sorted(flows.items(), key=lambda kv: tuple(str(x) for x in kv[0])):

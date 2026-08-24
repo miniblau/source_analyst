@@ -193,6 +193,25 @@ class TestBrief(unittest.TestCase):
         self.assertEqual(case["sink"]["arg_type"], "java.lang.String")
         self.assertTrue(case["sink"]["arg_type_resolved"])
 
+    def test_opengrep_sink_fact_does_not_displace_the_cpg_one(self):
+        """Both substrates emit `sink_candidate` at the same file:line and the
+        design encourages both to accrete into one log. Last-wins would let the
+        opengrep record — which has no `arg_is_literal` — silently drop that field
+        from every case."""
+        flow = flow_fact()
+        cpg_sink = records.fact(
+            {"kind": "sink_candidate", "file": "A.java", "line": 20, "name": "executeQuery",
+             "arg_is_literal": False, "arg_code": "sql", "resolved": True,
+             "subject": "s", "object": "o"}, "cpg:sql_sinks")
+        og_sink = records.fact(
+            {"kind": "sink_candidate", "file": "A.java", "line": 20, "rule": "java_sql_sink",
+             "code": "st.executeQuery(sql)", "vuln_class": "sqli"}, "opengrep:java_sql_sink")
+        # appended AFTER the CPG fact, which is what breaks a last-wins lookup
+        store.append([flow, cpg_sink, og_sink], self.log)
+        case = [r for r in self.brief("--agent", "hypothesize") if r.get("kind") == "case"][0]
+        self.assertIs(case["sink"]["arg_is_literal"], False,
+                      "the CPG record carries the field and must win")
+
     def test_empty_log_still_briefs_without_inventing_cases(self):
         rows = self.brief("--agent", "hypothesize")
         self.assertEqual(rows[0]["cases"], 0)

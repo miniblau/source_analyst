@@ -268,7 +268,7 @@ def score(log: list[dict], truth: dict, vuln_class: str, src: str | None) -> dic
 
     return {
         "kind": "scorecard", "class": vuln_class, "target": truth["target"],
-        "commit": truth.get("commit"), "src": src,
+        "commit": str(truth.get("commit", "")), "src": src or "",
         "scored": len(rows), "unlabelled": len(unlabelled),
         "skipped_other_class": other_class,
         "cases": {"true_positive": len(tp), "false_negative": len(fn),
