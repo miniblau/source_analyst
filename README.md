@@ -46,7 +46,7 @@ llama-server -m <model>.gguf -c 16384 --host 127.0.0.1 --port 8080 &
 export LLM_BASE_URL=http://127.0.0.1:8080/v1 SOURCE_ANALYST_RUNNER=openai_compat
 
 tools/pass.sh hypothesize sqli java 4
-tools/trace.sh /path/to/project sqli java 3      # optional: read the code, re-judge
+tools/trace.sh /path/to/project sqli java 1      # optional: read the code, re-judge
 tools/pass.sh report      sqli java 5
 render --class sqli --target "Client Project" > report.md
 ```
@@ -65,14 +65,24 @@ belief per trust verdict, so the log grows a tree and the belief store stops the
 run re-litigating a sanitizer someone already audited.
 
 ```bash
-tools/trace.sh /path/to/project sqli java 3
-tools/trace.sh /path/to/project sqli java 3 refuted   # re-examine the exclusions
+tools/trace.sh /path/to/project sqli java 1
+tools/trace.sh /path/to/project sqli java 1 refuted   # re-examine the exclusions
 ```
+
+**Batch size 1**, not 4 — a trace briefing carries method source and runs ~10k tokens
+per case against a hypothesize batch's ~4k. `brief` prints `bytes` in its run meta;
+budget against **~2.3 chars per token**, not 4, because source and fully-qualified
+identifiers tokenize far worse than prose. Getting this wrong is a batch that dies
+mid-record on the context limit.
 
 Depth is bounded by `config/depth.yaml`: a hard `max`, and a `spend_gate` that
 descends only where the last level made the case *stronger*. The null baseline keeps
 confidence flat and so cannot buy itself another level, which is the property that
 makes the gate worth having.
+
+The loop **drains and resumes**: admitting a child removes its parent from the
+eligible set, so a run interrupted halfway leaves a consistent log and re-running
+picks up where it stopped.
 
 ## Measuring a model
 
