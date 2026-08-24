@@ -790,6 +790,33 @@ the status field denies. But `trace` is **not yet safe to narrow with** on this 
 Use it for what it demonstrably does well: reading bodies, killing name-based
 refutations, and earning beliefs.
 
+**Repaired the same day, by re-examining the exclusions.** The prompt rules forbidding
+sanitizer-based refutation landed *during* that run, so most of the seven were judged
+without them. Re-tracing those seven on a scratch log under the corrected prompt
+returned `needs_proof` **7 of 7** — the regression was the prompt, not the idea.
+
+The live log was then repaired the way the system is meant to be, with
+`trace --status refuted` taking each exclusion a level deeper rather than by
+regenerating the log. Final state, 26 leaves over 3 depths:
+
+| | flat | traced (before) | after re-examination |
+|---|---|---|---|
+| precision | 1.0 | 1.0 | **0.885** |
+| recall | 1.0 | 0.696 | **1.0** |
+| site_recall | 1.0 | 0.846 | **1.0** |
+| findings | 23 | 16 | **23** |
+
+**But note where precision landed: 0.885 is exactly the null baseline's.** Re-examining
+*every* exclusion until none remained dissolved the three correct ones too — the agent
+would not re-commit to excluding the `MultipartFile` cases and returned `inconclusive`.
+Run to exhaustion, this converges on "keep everything", which is the floor a model is
+supposed to beat.
+
+So the operational rule is **selective**: re-examine the exclusions `render` flags —
+refutations on a sanitizer-carrying path — not all of them. That flag exists precisely
+because it does not correlate with confidence, and it selects the six that were wrong
+without touching the three that were right.
+
 The one unambiguous win is the belief store. Asked to audit
 `SqlInjectionLesson8.log`, the agent derived from the source that
 `action.replace('\'', '"')` cannot save a value concatenated into an `INSERT`, and

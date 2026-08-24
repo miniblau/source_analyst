@@ -75,12 +75,21 @@ budget against **~2.3 chars per token**, not 4, because source and fully-qualifi
 identifiers tokenize far worse than prose. Getting this wrong is a batch that dies
 mid-record on the context limit.
 
-**Measured caveat, 2026-08-24.** On WebGoat SQLi with a 30B local model, tracing held
-precision at 1.0 and dropped recall from **1.0 to 0.696** — seven real vulnerabilities
-refuted after the agent read the code that it had flagged correctly before. Use `trace`
-to read bodies, kill name-based refutations and earn beliefs; do **not** yet trust it to
-narrow a list. Everything it drops lands in the report's "Refuted — verify these"
-section, flagged, which is where you check it.
+**Re-examining exclusions, and when to.** Everything `trace` drops lands in the
+report's "Refuted — verify these" section. Entries flagged **Check this one** are
+refutations on a sanitizer-carrying path — the shape that does not correlate with
+confidence — and those are the ones to send back through:
+
+```bash
+tools/trace.sh /path/to/project sqli java 1 refuted
+```
+
+Do this **selectively, not wholesale.** Measured on WebGoat: the first traced pass
+refuted seven real vulnerabilities (recall 1.0 -> 0.696); re-examining every exclusion
+restored all seven (recall 1.0) but also dissolved the three *correct* exclusions into
+`inconclusive`, landing precision at 0.885 — exactly the null baseline's. Run to
+exhaustion this converges on "keep everything". The flag selects the six that were
+wrong without touching the three that were right.
 
 Depth is bounded by `config/depth.yaml`: a hard `max`, and a `spend_gate` that
 descends only where the last level made the case *stronger*. The null baseline keeps
