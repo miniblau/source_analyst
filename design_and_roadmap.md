@@ -832,6 +832,9 @@ queries/
   request_sources.sc    # ✅ built — request-tainted entry values (annotations + calls)
   reachable.sc          # ✅ built — dataflow source → sink
   sanitizer_on_path.sc  # ✅ built — does a candidate sanitizer sit on the flow?
+  callee_body.sc        # ✅ built 2026-08-24 — a method's real source, its parameters'
+                        #   resolved types, and the calls it makes. Four statuses, so
+                        #   "outside the analysed tree" never reads as "nothing there".
   callers.sc            # not built — expand callers of a method (needed for tier 2)
   implementors.sc       # not built — dynamic dispatch / interface impls (tier 2)
   arg_is_constant.sc    # not built — prune: is arg N a compile-time constant?
