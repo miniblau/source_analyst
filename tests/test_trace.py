@@ -156,6 +156,47 @@ class TestPriorBeliefsReachTrace(unittest.TestCase):
         self.assertEqual(header["prior_beliefs"], 1)
 
 
+class TestBriefingDoesNotGrowWithDepth(unittest.TestCase):
+    """Depth 2 was unreachable until this: a revision cites the bodies it read, so
+    those land in its own evidence, and re-tracing it sent every body twice."""
+
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(self.tmp.cleanup)
+        self.log = Path(self.tmp.name) / "log.jsonl"
+        self.env = dict(os.environ, SOURCE_ANALYST_LOG=str(self.log))
+        flow = records.fact(
+            {"kind": "flow", "subject": "p.C.h:R(S)", "object": "p.Helper.escape:S(S)",
+             "sink_file": "A.java", "sink_line": 20, "steps": []}, "cpg:reachable")
+        self.body = records.fact(
+            {"kind": "callee_body", "full_name": "p.Helper.escape:S(S)",
+             "status": "resolved", "name": "escape",
+             "body": "UNIQUEBODYMARKER " * 200}, "cpg:callee_body")
+        root = records.record("hypothesis",
+                              {"statement": "s", "vuln_class": "sqli", "status": "needs_proof",
+                               "confidence": 0.5, "evidence": [flow["id"]]},
+                              "agent:hypothesize")
+        child = records.record("hypothesis",
+                               {"statement": "s", "vuln_class": "sqli",
+                                "status": "needs_proof", "confidence": 0.9,
+                                "evidence": [flow["id"], self.body["id"]],
+                                "parent": root["id"], "depth": 1}, "agent:trace")
+        store.append([flow, self.body, root, child], self.log)
+
+    def test_a_body_is_briefed_once_not_once_per_level(self):
+        r = subprocess.run(
+            [sys.executable, "-m", "source_analyst.lifecycle.brief", "--agent", "trace",
+             "--class", "sqli", "--lang", "java"],
+            cwd=ROOT, env=self.env, capture_output=True, text=True)
+        self.assertEqual(r.returncode, 0, r.stderr)
+        row = [json.loads(x) for x in r.stdout.splitlines()
+               if json.loads(x).get("kind") == "trace_case"][0]
+        self.assertEqual(json.dumps(row).count("UNIQUEBODYMARKER"), 200,
+                         "the body was sent more than once")
+        # Still reachable and still citable: `callees` carries it, with its id.
+        self.assertIn(self.body["id"], [c.get("id") for c in row["callees"]])
+
+
 class TestAdmitTrace(unittest.TestCase):
     """What a revision may assert. `admit` is still the only door."""
 

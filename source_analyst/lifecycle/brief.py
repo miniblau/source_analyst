@@ -293,8 +293,14 @@ def _trace_rows(log: list[dict], status: str, cfg: dict[str, Any]) -> list[dict]
             # Same step-slimming the flat pass gets: on a trace briefing the path
             # steps were 36% of the whole thing, and a step repeats the previous
             # step's file and fully-qualified method far more often than not.
+            #
+            # Callee bodies are EXCLUDED here because `callees` below carries them in
+            # full, with their ids. Once a revision cites the bodies it read, they
+            # land in its own evidence — so re-tracing it sent every body twice and
+            # the briefing went from ~20KB to 44KB (~19k tokens against a 16384
+            # context). Depth 2 was unreachable for that reason alone.
             "evidence": [_slim_evidence(by_id[e]) for e in h.get("evidence", [])
-                         if e in by_id],
+                         if e in by_id and by_id[e].get("kind") != "callee_body"],
             # One entry per method asked for, present or not. A callee the substrate
             # could not read is a GAP, and it must be visible as one — an agent that
             # sees a short list infers the missing ones were unremarkable.
