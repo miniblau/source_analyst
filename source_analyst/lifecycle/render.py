@@ -95,7 +95,9 @@ def main(argv: list[str] | None = None) -> int:
     w("> **What this is not.** Every finding below is static-only. "
       + " ".join(sorted({f.get("tier", "") for f in findings})).strip()
       + " means: " + "; ".join(sorted({tiers[f["tier"]]["claim"] for f in findings if f.get("tier") in tiers}))
-      + ". Nothing was executed against a running target, so no finding here is confirmed.\n\n")
+      + ". Nothing was executed against a running target, so no finding here is confirmed."
+      + " The dataflow engine enumerates *representative* paths, not every route, so the"
+      + " paths quoted below are examples rather than an inventory.\n\n")
 
     # ---- Triage summary -----------------------------------------------------
     # Deterministic: counted off the log, never asked of a model. Confidence comes
@@ -145,6 +147,19 @@ def main(argv: list[str] | None = None) -> int:
             w(f"{f['impact'].strip()}\n\n")
         if h.get("reasoning"):
             w(f"**Why this was flagged.** {h['reasoning']}\n\n")
+        # Deterministic, because it is a property of the engine and not a judgement:
+        # asking an agent to remember it produced 0 mentions in 23 findings. A
+        # sanitizer seen on a reported path says nothing about the routes the engine
+        # did not enumerate, and reading it as coverage makes a live bug look safer.
+        cands = sorted({c.get("name") for fid in h.get("evidence", [])
+                        for c in (by_id.get(fid, {}).get("candidate_sanitizers") or [])
+                        if c.get("name")})
+        if cands:
+            w(f"**Sanitizer note.** `{'`, `'.join(cands)}` appeared on the reported "
+              "path(s) and has *not* been audited — presence is a substrate fact, "
+              "effectiveness is not. Because reported paths are representative rather "
+              "than exhaustive, a route reaching this sink with no sanitizer at all may "
+              "exist and simply not have been enumerated.\n\n")
         w("**Recreation**\n\n```\n" + f.get("recreation", "") + "\n```\n\n")
         w("**References**\n\n" + "".join(f"- `{r}`\n" for r in f.get("refs", [])) + "\n")
         # Never render a bare heading: an empty caveats section reads as "nothing to

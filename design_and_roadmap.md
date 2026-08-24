@@ -113,6 +113,17 @@ and the site comes from the evidence facts rather than the `case` string the age
 about itself (the same discipline `score` uses). A refutation is a model judgement; the
 path underneath it is a fact, and the two must not be allowed to blur.
 
+**Where a limit gets stated is a design decision — 2026-08-24.** The second report run
+produced caveats on all 23 findings, and **none of them** mentioned that the engine
+enumerates representative paths rather than all routes — the single most load-bearing
+caveat in the system. That was the wrong layer, not a weak model: the limit is a property
+of the engine, known deterministically, so `render` now states it in the report preamble
+and attaches a per-finding **Sanitizer note** wherever the evidence carries sanitizer
+candidates, naming them and saying plainly that a route with no sanitizer at all may exist
+unreported. The note appears only where candidates exist — boilerplate on every finding
+trains the reader to skip it. General rule: **if a caveat is derivable from the facts,
+the renderer owes it; only case-specific judgement belongs to the agent.**
+
 **Known limit, load-bearing.** `reachableByFlows` enumerates *representative* paths, not
 all routes (proven on WebGoat Lesson8: the clean 61→62 route is never returned). No tool
 may therefore claim a flow is sanitized, and none does — `sanitizer_on_path` reports

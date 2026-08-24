@@ -404,6 +404,75 @@ class TestRenderSummary(unittest.TestCase):
         self.assertNotIn("Refuted during triage", self.render())
 
 
+class TestRenderHonesty(unittest.TestCase):
+    """Limits that are properties of the engine are stated by the renderer, not
+    requested of an agent. Asking produced 0 mentions across 23 real findings."""
+
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(self.tmp.cleanup)
+        self.log = Path(self.tmp.name) / "log.jsonl"
+        self.env = dict(os.environ, SOURCE_ANALYST_LOG=str(self.log))
+
+    def seed(self, candidates):
+        flow = flow_fact()
+        evidence = [flow["id"]]
+        recs = [flow]
+        if candidates:
+            check = records.fact(
+                {"kind": "sanitizer_check", "source_name": "q", "source_file": "A.java",
+                 "source_line": 10, "sink_file": "A.java", "sink_line": 20,
+                 "sink_name": "executeQuery", "reported_paths": 1,
+                 "reported_paths_without_sanitizer": 0,
+                 "candidate_count": len(candidates),
+                 "candidate_sanitizers": [{"name": n, "file": "A.java", "line": 15,
+                                           "code": f"s.{n}()", "step_index": 1,
+                                           "full_name": "x", "resolved": True}
+                                          for n in candidates]},
+                "cpg:sanitizer_on_path")
+            recs.append(check)
+            evidence.append(check["id"])
+        h = records.record("hypothesis", {
+            "statement": "s", "vuln_class": "sqli", "status": "needs_proof",
+            "confidence": 0.8, "evidence": evidence}, src="agent:test")
+        recs.append(h)
+        recs.append(records.record("finding", {
+            "hypothesis": h["id"], "title": "t", "tier": "static_reachability",
+            "severity": "high", "recreation": "r", "refs": ["A.java:20"],
+            "caveats": "the agent's own caveat"}, src="agent:test"))
+        store.append(recs, self.log)
+
+    def render(self):
+        r = subprocess.run(
+            [sys.executable, "-m", "source_analyst.lifecycle.render", "--class", "sqli"],
+            cwd=ROOT, env=self.env, capture_output=True, text=True)
+        self.assertEqual(r.returncode, 0, r.stderr)
+        return r.stdout
+
+    def test_representative_paths_limit_is_always_stated(self):
+        self.seed([])
+        self.assertIn("representative", self.render())
+
+    def test_sanitizer_note_names_the_candidates_and_their_status(self):
+        self.seed(["replace", "matches"])
+        out = self.render()
+        self.assertIn("Sanitizer note", out)
+        self.assertIn("`matches`, `replace`", out)
+        self.assertIn("not* been audited", out)
+
+    def test_sanitizer_note_warns_a_clean_route_may_be_unreported(self):
+        """The error that makes a live vulnerability look safer: reading 'a
+        sanitizer was on the reported path' as 'every route is sanitized'."""
+        self.seed(["replace"])
+        note = self.render().split("**Sanitizer note.**")[1].split("\n")[0]
+        self.assertIn("no sanitizer at all may exist", note)
+
+    def test_no_sanitizer_note_when_no_candidate_was_seen(self):
+        """Boilerplate on every finding would train the reader to skip it."""
+        self.seed([])
+        self.assertNotIn("Sanitizer note", self.render())
+
+
 class TestPromptHygiene(unittest.TestCase):
     """Over-fitting guard (§8): agents learn the class from the manifest, never
     from their own prompt. A prompt naming a class would not survive class #2."""

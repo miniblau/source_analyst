@@ -165,6 +165,9 @@ The substrate spine. Get this right and most of the system follows.
   site the *substrate* never offered (a substrate gap, not a model miss), and a hypothesis
   about an *unlabelled* site (unscored, not correct). Grade on evidence facts, never on
   the `case` string the agent wrote about itself.
+- **If a caveat is derivable from the facts, the renderer owes it.** Only case-specific
+  judgement belongs to the agent. Asking the model to restate the representative-paths
+  limit produced 0 mentions across 23 findings; `render` now emits it deterministically.
 - **A prompt and a grammar that disagree fail silently.** Constrained decoding cannot
   emit a field the schema does not declare, so an instruction to produce one is
   unobeyable and *nothing errors*. Anything the agent prompt asks for must exist in
