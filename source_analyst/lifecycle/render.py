@@ -273,9 +273,14 @@ def main(argv: list[str] | None = None) -> int:
                            else -1.0, site_of(h, by_id)))
         for h in rows:
             conf = h.get("confidence")
+            # `reasoning` comes from the flat pass, `basis` from a trace revision.
+            # A traced refutation has the latter, and printing "(no reasoning
+            # recorded)" against the one exclusion someone actually read the code for
+            # would bury the best-argued entry in the list.
+            why = str(h.get("reasoning") or h.get("basis") or "").strip()
             w(f"- `{site_of(h, by_id)}` \u2014 **confidence "
               f"{conf if conf is not None else '?'}** \u2014 "
-              f"{h.get('reasoning', '(no reasoning recorded)')}\n")
+              f"{why or '(no reasoning recorded)'}\n")
             # Derivable from the facts, so the renderer owes it. The agent is never
             # shown the body of the method being called, so a refutation can rest on
             # a resolved argument type (sound) or on what things are named (a guess
@@ -288,7 +293,19 @@ def main(argv: list[str] | None = None) -> int:
                     arg_type = f0["sink_arg_type"]
                     resolved = bool(f0.get("sink_arg_type_resolved"))
                     break
-            if arg_type and resolved:
+            # Strongest available, in order. Once `trace` has read a body, saying the
+            # implementation "was never examined" is simply false — and it is the one
+            # sentence in this section a reviewer acts on.
+            bodies = sorted({by_id.get(fid, {}).get("name")
+                             for fid in h.get("evidence", [])
+                             if by_id.get(fid, {}).get("kind") == "callee_body"
+                             and by_id.get(fid, {}).get("status") == "resolved"} - {None})
+            if bodies:
+                w(f"  **Basis:** the source of {len(bodies)} method(s) on this path was "
+                  f"read \u2014 " + ", ".join(f"`{b}`" for b in bodies[:6])
+                  + (f" and {len(bodies) - 6} more" if len(bodies) > 6 else "")
+                  + ". This exclusion rests on the code, not on naming.\n")
+            elif arg_type and resolved:
                 w(f"  **Basis:** the tainted argument is `{arg_type}` \u2014 a resolved "
                   f"type, so this exclusion does not rest on naming.\n")
             else:

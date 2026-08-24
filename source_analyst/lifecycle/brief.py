@@ -234,6 +234,29 @@ def traceable(log: list[dict], status: str, cfg: dict[str, Any]) -> list[dict]:
     return sorted(out, key=lambda h: h["id"])
 
 
+def _slim_callee(c: dict) -> dict:
+    """Drop what the body already says.
+
+    Measured on a two-case WebGoat trace briefing: the `calls` list was 47% of the
+    whole thing (26KB of 55KB), and with the method's own source right beside it most
+    of that is the same text twice — each call's `code`, and every `<operator>` entry
+    for a concatenation the reader can see written out. What the list adds over the
+    body is the *resolved* callee name, so that is what is kept.
+
+    Only when the body is actually there. When it is not, `statements` and `calls` are
+    the only view of the method that exists and every field earns its place.
+    """
+    if c.get("status") != "resolved" or not str(c.get("body", "")).strip():
+        return c
+    out = {k: v for k, v in c.items() if k != "statements"}
+    out["calls"] = [{"name": x.get("name"), "full_name": x.get("full_name"),
+                     "line": x.get("line"), "resolved": x.get("resolved")}
+                    for x in c.get("calls", []) if not x.get("is_operator")]
+    # Say what was dropped, so a short list is not read as a short method.
+    out["calls_omitted_operators"] = sum(1 for x in c.get("calls", []) if x.get("is_operator"))
+    return out
+
+
 def _trace_rows(log: list[dict], status: str, cfg: dict[str, Any]) -> list[dict]:
     by_id = {r["id"]: r for r in log}
     bodies: dict[str, dict] = {}
@@ -252,7 +275,7 @@ def _trace_rows(log: list[dict], status: str, cfg: dict[str, Any]) -> list[dict]
             # One entry per method asked for, present or not. A callee the substrate
             # could not read is a GAP, and it must be visible as one — an agent that
             # sees a short list infers the missing ones were unremarkable.
-            "callees": [bodies.get(n, {"full_name": n, "status": "not_queried"})
+            "callees": [_slim_callee(bodies.get(n, {"full_name": n, "status": "not_queried"}))
                         for n in wanted],
         })
     return rows
