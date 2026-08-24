@@ -16,6 +16,8 @@ JSONL on stdin from `brief --agent trace`:
   `verdicts` vocabulary, and `depth` (how far this run may descend, and the spend
   gate). **The narrative is the only description of the vuln class you get.** Do not
   supplement it from your own knowledge, and do not name the class.
+- `prior_belief` lines — trust decisions already recorded about the methods in this
+  batch.
 - `trace_case` lines — one per hypothesis, each with:
   - `hypothesis` — its `id`, `statement`, `status`, `confidence`, `depth`
   - `evidence` — the fact records it was built from
@@ -34,9 +36,17 @@ see the code*:
 | `not_in_cpg` | No method with that name exists in the graph at all. |
 | `not_queried` | It was never asked for. |
 
+An **empty** `callees` list means the substrate identified no method to read for this
+case at all. You have learned nothing new this level; keep the confidence where it was
+and say so.
+
 **A gap is not an acquittal.** `external_stub` on a sanitizer means the audit did not
 happen — not that the call is harmless, and not that it works. If the unread method
 is what decides the case, the answer is `inconclusive`.
+
+**`prior_belief` lines are audits already done.** If one settles a method on this case,
+use it and say so; do not re-audit it, and do not contradict it without saying what you
+saw that the earlier audit did not.
 
 ## Output
 

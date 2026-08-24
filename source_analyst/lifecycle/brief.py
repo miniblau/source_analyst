@@ -133,6 +133,22 @@ def _beliefs_for(cases: list[dict]) -> list[dict]:
             if any(n and n in key[0] for n in names) or key[0] in names]
 
 
+def _beliefs_for_trace(rows: list[dict]) -> list[dict]:
+    """Beliefs about the methods THIS batch is about to read.
+
+    `trace` is the agent that produces beliefs, which makes it the one that most
+    needs to see them: the store exists so a later run prunes instead of re-auditing,
+    and an agent shown none will cheerfully re-litigate a sanitizer someone already
+    settled — and may contradict it, leaving two verdicts and no way to tell which
+    the reviewer meant. Keyed on the exact method full name, because that is what a
+    verdict's subject is.
+    """
+    subjects = {c.get("full_name") for row in rows for c in row.get("callees", [])
+                if c.get("full_name")}
+    live = store.project()
+    return [rec for key, rec in sorted(live.items()) if key[0] in subjects]
+
+
 
 # --------------------------------------------------------------------- trace
 
@@ -405,7 +421,12 @@ def main(argv: list[str] | None = None) -> int:
     # it changes what "this is the only one of its kind" would mean.
     header["chunk"] = {"index": args.chunk, "of": n_chunks, "rows": len(rows),
                        "rows_total": total}
-    beliefs = _beliefs_for(rows) if args.agent == "hypothesize" else []
+    if args.agent == "hypothesize":
+        beliefs = _beliefs_for(rows)
+    elif args.agent == "trace":
+        beliefs = _beliefs_for_trace(rows)
+    else:
+        beliefs = []
     header["cases" if args.agent == "hypothesize" else "hypotheses"] = len(rows)
     header["prior_beliefs"] = len(beliefs)
 

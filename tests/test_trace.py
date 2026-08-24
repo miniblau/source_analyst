@@ -107,6 +107,55 @@ class TestCalleeSelection(unittest.TestCase):
         self.assertEqual(callees_of(hyp("h_a", evidence=["f_nope"]), {}), [])
 
 
+class TestPriorBeliefsReachTrace(unittest.TestCase):
+    """`trace` is the agent that produces beliefs, which makes it the one that most
+    needs to see them — the store exists so a later run prunes instead of re-auditing."""
+
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(self.tmp.cleanup)
+        self.log = Path(self.tmp.name) / "log.jsonl"
+        self.env = dict(os.environ, SOURCE_ANALYST_LOG=str(self.log))
+        flow = records.fact(
+            {"kind": "flow", "subject": "p.C.h:R(S)", "object": "p.Helper.escape:S(S)",
+             "sink_file": "A.java", "sink_line": 20, "steps": []}, "cpg:reachable")
+        root = records.record("hypothesis",
+                              {"statement": "s", "vuln_class": "sqli", "status": "needs_proof",
+                               "confidence": 0.6, "evidence": [flow["id"]]}, "agent:hypothesize")
+        body = records.fact({"kind": "callee_body", "full_name": "p.Helper.escape:S(S)",
+                             "status": "resolved", "name": "escape", "body": "..."},
+                            "cpg:callee_body")
+        audited = records.belief("p.Helper.escape:S(S)", "sanitizes", "sqli", "unsound",
+                                 "it only strips one quote form", "human")
+        unrelated = records.belief("p.Other.thing:S(S)", "sanitizes", "sqli", "sound",
+                                   "not on this path at all", "human")
+        store.append([flow, root, body, audited, unrelated], self.log)
+
+    def brief(self):
+        return subprocess.run(
+            [sys.executable, "-m", "source_analyst.lifecycle.brief", "--agent", "trace",
+             "--class", "sqli", "--lang", "java"],
+            cwd=ROOT, env=self.env, capture_output=True, text=True)
+
+    def test_a_belief_about_a_method_in_this_batch_is_shown(self):
+        r = self.brief()
+        self.assertEqual(r.returncode, 0, r.stderr)
+        priors = [json.loads(x) for x in r.stdout.splitlines()
+                  if json.loads(x).get("kind") == "prior_belief"]
+        self.assertEqual([p["subject"] for p in priors], ["p.Helper.escape:S(S)"])
+        self.assertEqual(priors[0]["verdict"], "unsound")
+
+    def test_a_belief_about_a_method_not_in_this_batch_is_not_shown(self):
+        """Everything in a briefing is context the model pays for and may reason from.
+        An audit of a method this case never touches is noise that can only mislead."""
+        out = self.brief().stdout
+        self.assertNotIn("p.Other.thing", out)
+
+    def test_the_header_counts_what_was_shown(self):
+        header = json.loads(self.brief().stdout.splitlines()[0])
+        self.assertEqual(header["prior_beliefs"], 1)
+
+
 class TestAdmitTrace(unittest.TestCase):
     """What a revision may assert. `admit` is still the only door."""
 
