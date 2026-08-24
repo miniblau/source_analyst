@@ -451,6 +451,26 @@ class TestATracedLogIsReadCorrectlyDownstream(unittest.TestCase):
         self.assertIn("**1** hypothesis/es", out)
         self.assertIn("**1** finding(s)", out)
 
+    def test_supersession_is_stated_on_a_report_that_has_findings_too(self):
+        """The zero-findings branch is precisely the reader who does not need this.
+        Someone holding 21 findings off a log containing 23 is the one entitled to
+        know why two are missing."""
+        stale_f = records.record("finding",
+                                 {"hypothesis": self.root["id"], "title": "stale",
+                                  "severity": "high", "tier": "static_reachability",
+                                  "recreation": "r", "refs": ["A.java:20"], "caveats": "c"},
+                                 "agent:report")
+        live_f = records.record("finding",
+                                {"hypothesis": self.child["id"], "title": "current",
+                                 "severity": "high", "tier": "static_reachability",
+                                 "recreation": "r", "refs": ["A.java:20"], "caveats": "c"},
+                                "agent:report")
+        store.append([stale_f, live_f], self.log)
+        out = self._render().stdout
+        self.assertIn("current", out)
+        self.assertIn("superseded by a later `trace` level", out)
+        self.assertIn("as it now stands", out)
+
     def test_render_counts_a_revised_case_once(self):
         """Counting the whole chain inflates every status tally in the summary, and
         would make "every candidate was refuted" fire on a set that is mostly its own

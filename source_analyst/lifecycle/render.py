@@ -142,6 +142,15 @@ def main(argv: list[str] | None = None) -> int:
           + (f" **{len(refuted)}** further candidate(s) were refuted; they are listed at "
              f"the end and are worth a look." if refuted else "")
           + "\n\n")
+        # Also on a report that HAS findings. It was originally only in the
+        # zero-findings branch, which is precisely the reader who does not need it:
+        # someone holding 21 findings off a log containing 23 is the one entitled to
+        # know why two are missing.
+        if stale:
+            w(f"> **{len(stale)}** hypothesis/es"
+              + (f" and **{stale_findings}** finding(s)" if stale_findings else "")
+              + " in this log were superseded by a later `trace` level and are not"
+                " shown; what appears below is each case as it now stands.\n\n")
     else:
         # Invariant #8 at the last mile. Every tool in this repo refuses to let zero
         # results read as "nothing here"; the report a human actually reads must do
