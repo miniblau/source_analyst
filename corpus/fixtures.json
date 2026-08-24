@@ -116,6 +116,16 @@
             "quote"
           ]
         }
+      },
+      "callee_body": {
+        "params": {
+          "methods": [
+            "demo.FlowController.escape:java.lang.String(java.lang.String)",
+            "demo.FlowController.runQuery:java.sql.ResultSet(java.lang.String)",
+            "java.sql.Connection.prepareStatement:java.sql.PreparedStatement(java.lang.String)",
+            "demo.FlowController.noSuchMethod:void()"
+          ]
+        }
       }
     }
   },
@@ -215,6 +225,14 @@
             "setInt",
             "matches",
             "quote"
+          ]
+        }
+      },
+      "callee_body": {
+        "params": {
+          "methods": [
+            "org.owasp.webgoat.lessons.pathtraversal.ProfileUploadBase.execute:org.owasp.webgoat.container.assignments.AttackResult(org.springframework.web.multipart.MultipartFile,java.lang.String,java.lang.String)",
+            "java.sql.Connection.prepareStatement:java.sql.PreparedStatement(java.lang.String)"
           ]
         }
       }

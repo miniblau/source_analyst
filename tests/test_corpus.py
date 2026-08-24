@@ -249,6 +249,101 @@ class TestGolden(unittest.TestCase):
         for f in l8:
             self.assertGreater(f["candidate_count"], 0, "the replace() detour should be reported")
 
+    # ------------------------------------------------------------- callee_body
+
+    def test_callee_body_two_sided_fixture(self):
+        """Two-sided on the SAME code path: every name below is looked up the same
+        way, so only what the CPG actually holds separates the answers. A query that
+        replied from the name string would pass the in-tree case and fail the rest."""
+        facts, meta = self._check("java_sqli_flow", "callee_body")
+        by_name = {f["full_name"]: f for f in facts}
+        qm = meta["query_meta"]
+
+        # One row per request, in the order asked — a name that matched nothing is
+        # stated, never omitted.
+        self.assertEqual(len(facts), qm["requested"])
+        self.assertEqual([f["full_name"] for f in facts],
+                         FIXTURES["java_sqli_flow"]["queries"]["callee_body"]["params"]["methods"])
+
+        # POSITIVE: in-tree, and the body is the real text off disk, not the signature.
+        esc = by_name["demo.FlowController.escape:java.lang.String(java.lang.String)"]
+        self.assertEqual(esc["status"], "resolved")
+        self.assertIn("s.replace(", esc["body"])
+        self.assertIn("replace", [c["name"] for c in esc["calls"]])
+        self.assertFalse(esc["is_external"])
+
+        # POSITIVE: a callee that contains the sink — proves the body is the callee's
+        # own code and not the caller's.
+        rq = by_name["demo.FlowController.runQuery:java.sql.ResultSet(java.lang.String)"]
+        self.assertEqual(rq["status"], "resolved")
+        self.assertIn("executeQuery", rq["body"])
+        self.assertIn("executeQuery", [c["name"] for c in rq["calls"]])
+
+        # NEGATIVE: a library method. The node EXISTS, so "not found" would be wrong;
+        # the body is absent, so "resolved" would be a lie. Neither may collapse into
+        # the other — a caller that reads this as "nothing there" has re-created the
+        # naming bug this query was written to fix.
+        ext = by_name[
+            "java.sql.Connection.prepareStatement:java.sql.PreparedStatement(java.lang.String)"]
+        self.assertEqual(ext["status"], "external_stub")
+        self.assertEqual(ext["body"], "")
+        self.assertTrue(ext["is_external"])
+
+        # NEGATIVE: no such method anywhere.
+        self.assertEqual(by_name["demo.FlowController.noSuchMethod:void()"]["status"],
+                         "not_in_cpg")
+
+        self.assertEqual((qm["resolved"], qm["external_stub"], qm["not_in_cpg"]), (2, 1, 1))
+        self.assertEqual(qm["source_unavailable"], 0)
+        self.assertTrue(qm["source_root_readable"])
+
+    def test_callee_body_line_range_matches_the_file_on_disk(self):
+        """The body is read off disk by line range, so an off-by-one would hand the
+        agent a neighbouring method and read as fact. Check it against the source."""
+        fx = FIXTURES["java_sqli_flow"]
+        src = ROOT / fx["path"]
+        facts, _ = run_query(src, "callee_body", fx["queries"]["callee_body"]["params"],
+                             fx["lang"])
+        for f in facts:
+            if f["status"] != "resolved":
+                continue
+            on_disk = (src / f["file"]).read_text().splitlines()
+            want = on_disk[f["line_start"] - 1:f["line_end"]]
+            self.assertEqual(f["body"].splitlines(), want,
+                             f"{f['name']}: emitted body is not the file's own lines")
+            self.assertIn(f["name"], want[0])
+
+    def test_callee_body_webgoat_reads_the_method_a_report_refuted_by_name(self):
+        """The case that motivated the query: three exclusions in the first WebGoat
+        report rested on the callee's package looking unrelated to databases. The
+        body settles it from code — file IO, no database call anywhere."""
+        fx = FIXTURES["webgoat"]
+        src = ROOT / fx["path"]
+        if not src.is_dir():
+            self.skipTest("webgoat fixture not present")
+        facts, meta = run_query(src, "callee_body", fx["queries"]["callee_body"]["params"],
+                                fx["lang"])
+        upload = facts[0]
+        self.assertEqual(upload["status"], "resolved")
+        self.assertTrue(upload["file"].endswith("ProfileUploadBase.java"))
+        names = {c["name"] for c in upload["calls"]}
+        self.assertIn("createNewFile", names)
+        self.assertFalse(names & {"executeQuery", "executeUpdate", "prepareStatement",
+                                  "createQuery", "createNativeQuery"},
+                         "no database call is reachable in this body — that is the refutation")
+        # The tainted parameter's type, argued from the signature rather than the name.
+        types = {p["type"] for p in upload["parameters"]}
+        self.assertIn("org.springframework.web.multipart.MultipartFile", types)
+        self.assertTrue(all(p["type_resolved"] for p in upload["parameters"]))
+        self.assertEqual(meta["query_meta"]["external_stub"], 1)
+
+    def test_callee_body_requires_its_param(self):
+        """A callee_body with no methods asked for scanned nothing, and a tool that
+        scanned nothing must not exit 0 (CLAUDE.md)."""
+        fx = FIXTURES["java_sqli_min"]
+        with self.assertRaises(AssertionError):
+            run_query(ROOT / fx["path"], "callee_body", {}, fx["lang"])
+
     def test_empty_result_is_disambiguated(self):
         """No match must be distinguishable from a CPG that built nothing."""
         fx = FIXTURES["java_sqli_min"]
