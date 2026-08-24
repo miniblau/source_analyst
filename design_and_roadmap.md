@@ -674,6 +674,14 @@ Verification tier 3 against a defined target: harness generation, PoC execution,
   agent can't wander). Raw-Joern escape hatch deferred to a later phase.
 - Confidence model: single scalar, or separate reachability-confidence vs
   exploitability-confidence? (The latter maps better to your manual triage.)
+- Calibration signal selection — **deferred by decision (2026-08-24).**
+  `config/calibration.yaml` is data and `score` already reports rho per signal, so a
+  sweep costs no code. But WebGoat is a teaching corpus: one class, one language, sinks
+  shaped to be found, and no negatives among the kept set — which is exactly why
+  `mean_on_noise` and `separation` come back null. Selecting a metric there optimises
+  against a set that has nothing to discriminate. Revisit once >=2 classes and >=2
+  languages are live on a target that resembles an application rather than a lesson
+  plan, and hold targets out of the sweep: best-of-N over 23 points selects noise.
 
 ---
 
