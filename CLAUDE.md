@@ -138,6 +138,14 @@ The substrate spine. Get this right and most of the system follows.
   and the header tells the agent it is holding a chunk — an agent given four cases must
   not conclude four is all there is. A batch that fails stops the pass: half a pass
   silently admitted is worse than none, because the log then looks complete.
+- **Briefings grow from upstream.** What an agent sees is assembled from the log, so
+  any leg that writes richer records enlarges every briefing downstream of it. `trace`
+  putting callee bodies into a hypothesis's evidence took the *report* briefing from
+  ~4k tokens for four cases to 14.2k, on a pass whose chunk size nobody had reason to
+  revisit. Slim in `brief` — it is the layer whose job is choosing what an agent sees —
+  and never size a briefing with bytes/4: source and fully-qualified identifiers
+  measured ~2.3 chars per token, so that estimate under-counts by 1.75x. `brief` prints
+  `bytes` for exactly this.
 - **Keep the model server warm**, for the same reason the Joern server stays warm.
   Reloading a 20GB model per batch costs more than the inference does.
 - **`run_agent` is the seam, and the only one.** It spawns a command from
