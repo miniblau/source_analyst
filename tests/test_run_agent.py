@@ -195,6 +195,10 @@ class TestFailureModes(unittest.TestCase):
         self.assertEqual(r.returncode, 4)
         self.assertIn("4 case(s) briefed but only 1", r.stderr)
         self.assertIn("unjudged", r.stderr)
+        # The first cut of this gate printed the records and *then* exited 4, so
+        # `run_agent | admit` had already handed the short batch over and it landed
+        # in the log. A non-zero exit stops the next command, not the current pipe.
+        self.assertEqual(r.stdout.strip(), "")
 
     def test_one_record_per_case_is_success(self):
         rec = json.dumps({"statement": "s", "vuln_class": "sqli", "status": "proposed",

@@ -237,14 +237,15 @@ def main(argv: list[str] | None = None) -> int:
               file=sys.stderr)
         return 2
 
-    for obj in objs:
-        print(json.dumps(obj, ensure_ascii=False, separators=(",", ":")))
-    print(json.dumps(meta, separators=(",", ":")), file=sys.stderr)
-
+    # Every failure below emits NOTHING on stdout. A non-zero exit only stops the
+    # *next* command in a script; in a pipe, `run_agent | admit` has already handed
+    # the records over by then, and the partial batch lands in the log regardless.
+    # Withholding stdout is what actually makes the gate a gate.
     if not objs:
         # Same discipline as an empty scan: producing nothing is not a result.
         # A silent exit 0 here would let an empty `admit` read as "the model
         # judged there was nothing to say", which it did not.
+        print(json.dumps(meta, separators=(",", ":")), file=sys.stderr)
         print(f"run_agent: the runner emitted no JSON records ({len(junk)} lines discarded)"
               f" — this run established nothing; see {transcript}", file=sys.stderr)
         return 3
@@ -255,10 +256,15 @@ def main(argv: list[str] | None = None) -> int:
         # cases the model had deliberately dismissed — the log would simply be
         # short, and short reads as complete. A case an agent cannot judge must be
         # returned as `inconclusive`, not omitted.
+        print(json.dumps(meta, separators=(",", ":")), file=sys.stderr)
         print(f"run_agent: {n_cases} case(s) briefed but only {len(objs)} record(s) returned"
-              f" — {n_cases - len(objs)} case(s) went unjudged; see {transcript}",
-              file=sys.stderr)
+              f" — {n_cases - len(objs)} case(s) went unjudged and are withheld;"
+              f" see {transcript}", file=sys.stderr)
         return 4
+
+    for obj in objs:
+        print(json.dumps(obj, ensure_ascii=False, separators=(",", ":")))
+    print(json.dumps(meta, separators=(",", ":")), file=sys.stderr)
     return 0
 
 
