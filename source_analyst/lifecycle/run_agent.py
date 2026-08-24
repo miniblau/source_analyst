@@ -15,6 +15,14 @@ Consequences worth stating, because they are the point:
   * A model that hallucinates a fact id gets through here and is rejected by
     `admit`. That is by design — this tool is a transport, not a gate.
 
+Exit codes. Only 0 means "the model answered the question it was asked":
+
+    0  records returned, one or more per briefed case
+    2  the runner itself failed (non-zero exit)
+    3  the runner returned no JSON records at all — this run established nothing
+    4  fewer records than cases: some case went unjudged and the log would be
+       silently short, which reads downstream as complete
+
     brief --agent hypothesize --class sqli --lang java \
       | run_agent --agent hypothesize \
       | admit --type hypothesis --class sqli --lang java --src agent:hypothesize
@@ -140,6 +148,21 @@ def extract(stdout: str) -> tuple[list[dict], list[str]]:
     return objs, junk
 
 
+def count_cases(briefing: str) -> int:
+    """How many cases the agent was handed. The briefing is JSONL and says so."""
+    n = 0
+    for line in briefing.splitlines():
+        line = line.strip()
+        if not line.startswith("{"):
+            continue
+        try:
+            if json.loads(line).get("kind") == "case":
+                n += 1
+        except ValueError:
+            continue
+    return n
+
+
 def transcript_dir() -> Path:
     return var_root() / "agent_runs"
 
@@ -199,11 +222,13 @@ def main(argv: list[str] | None = None) -> int:
     private_file(transcript)
 
     objs, junk = extract(proc.stdout)
+    n_cases = count_cases(briefing)
     # "" not null: a runner that names no model has an empty one, it is not missing.
     meta = {"cmd": "run_agent", "runner": name, "agent": args.agent,
             "model": str(spec.get("model", "")),
             "rc": proc.returncode, "elapsed_s": elapsed, "records": len(objs),
-            "discarded_lines": len(junk), "run_id": run_id, "transcript": str(transcript)}
+            "cases": n_cases, "discarded_lines": len(junk), "run_id": run_id,
+            "transcript": str(transcript)}
 
     if proc.returncode != 0:
         print(proc.stderr.strip()[-2000:], file=sys.stderr)
@@ -223,6 +248,17 @@ def main(argv: list[str] | None = None) -> int:
         print(f"run_agent: the runner emitted no JSON records ({len(junk)} lines discarded)"
               f" — this run established nothing; see {transcript}", file=sys.stderr)
         return 3
+
+    if n_cases and len(objs) < n_cases:
+        # Observed on a 0.5B: four cases in, one record out, exit 0. The missing
+        # three were never judged, but nothing downstream could tell them from
+        # cases the model had deliberately dismissed — the log would simply be
+        # short, and short reads as complete. A case an agent cannot judge must be
+        # returned as `inconclusive`, not omitted.
+        print(f"run_agent: {n_cases} case(s) briefed but only {len(objs)} record(s) returned"
+              f" — {n_cases - len(objs)} case(s) went unjudged; see {transcript}",
+              file=sys.stderr)
+        return 4
     return 0
 
 

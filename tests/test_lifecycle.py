@@ -118,15 +118,27 @@ class TestAdmitGate(unittest.TestCase):
              "recreation": "r", "refs": ["A.java:20"], "title": "t", "caveats": "c"}
         self.assertNotEqual(self.run_admit(f, kind="finding").returncode, 0)
 
-    def test_class_mismatch_rejected(self):
-        """Observed on the first local-model run: the model wrote the class's human
-        title where its identifier belongs. Every judgement was right and four of
-        them still fell out of every query keyed on class — a silent partial result,
-        which is worse than a loud failure."""
+    def test_class_title_is_accepted_as_an_alias(self):
+        """Observed on the first local-model run and again on a 0.5B: the model wrote
+        the class's human title where its identifier belongs. Both spellings come from
+        the same manifest, so this is a formatting slip, not a judgement error — and
+        constrained decoding exists to keep formatting out of the measurement."""
         r = self.run_admit(self.hyp(vuln_class="SQL injection"))
+        self.assertEqual(r.returncode, 0, r.stderr)
+
+    def test_an_accepted_alias_is_normalised_to_the_identifier(self):
+        """The alias is accepted at the door and never survives it: everything
+        downstream keys on the identifier, so a title in the log would be the silent
+        partial result all over again."""
+        rec = json.loads(self.run_admit(self.hyp(vuln_class="SQL injection")).stdout)
+        self.assertEqual(rec["vuln_class"], "sqli")
+
+    def test_a_different_class_is_still_rejected(self):
+        """Naming another class is comprehension, not formatting. The class is not
+        the agent's to invent."""
+        r = self.run_admit(self.hyp(vuln_class="xss"))
         self.assertNotEqual(r.returncode, 0)
         self.assertIn("vuln_class", r.stderr)
-        self.assertIn("verbatim", r.stderr)
 
     def test_batch_is_all_or_nothing(self):
         good, bad = self.hyp(), self.hyp(evidence=["f_" + "1" * 24])

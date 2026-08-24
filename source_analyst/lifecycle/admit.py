@@ -58,18 +58,31 @@ def _require(obj: dict, fields: tuple[str, ...], what: str) -> None:
         raise AdmitError(f"{what} is missing required field(s): {', '.join(missing)}")
 
 
+def _class_aliases(vuln_class: str, class_title: str | None) -> set[str]:
+    """Spellings of a class that mean the class. Both come from its manifest, so a
+    new class adds no code here and no entry anywhere else."""
+    return {vuln_class} | ({class_title} if class_title else set())
+
+
 def check_hypothesis(obj: dict, log_ids: dict[str, str], dynamic: bool,
-                     vuln_class: str | None = None) -> None:
+                     vuln_class: str | None = None,
+                     class_title: str | None = None) -> None:
     _require(obj, HYPOTHESIS_FIELDS, "hypothesis")
-    if vuln_class is not None and obj["vuln_class"] != vuln_class:
-        # Observed on the first local-model run: the model wrote the class's human
-        # TITLE ("SQL injection") where the briefing's `class` identifier belongs.
-        # Every judgement was correct and four of them still fell out of every
-        # downstream query keyed on class — a silent partial result, which is worse
-        # than a loud failure. The class is not the agent's to name.
+    if vuln_class is not None and obj["vuln_class"] not in _class_aliases(vuln_class, class_title):
+        # Observed on the first local-model run and again on a 0.5B: the model wrote
+        # the class's human TITLE ("SQL injection") where the briefing's `class`
+        # identifier belongs. Every judgement was correct and four of them still fell
+        # out of every downstream query keyed on class — a silent partial result,
+        # which is worse than a loud failure.
+        #
+        # The title is now accepted as an alias, because both spellings come from the
+        # same manifest and the mismatch was a formatting slip, not a judgement error
+        # — and constrained decoding exists precisely to keep formatting out of the
+        # measurement. Naming a DIFFERENT class is still rejected: that is a
+        # comprehension failure, and the class is not the agent's to invent.
         raise AdmitError(
             f"hypothesis is labelled vuln_class {obj['vuln_class']!r} but is being "
-            f"admitted under {vuln_class!r} — copy the briefing's `class` verbatim")
+            f"admitted under {vuln_class!r} — use the briefing's `class` verbatim")
     vocab = statuses()
     status = obj["status"]
     if status not in vocab:
@@ -130,7 +143,7 @@ def main(argv: list[str] | None = None) -> int:
     args = p.parse_args(argv)
 
     try:
-        load_class(args.vuln_class)
+        klass = load_class(args.vuln_class)
         ceiling = load_patterns(args.vuln_class, args.lang).max_static_tier
     except ManifestError as e:
         raise SystemExit(f"admit: {e}")
@@ -153,9 +166,13 @@ def main(argv: list[str] | None = None) -> int:
     try:
         for obj in objs:
             if args.type == "hypothesis":
-                check_hypothesis(obj, log_ids, args.dynamic, args.vuln_class)
+                check_hypothesis(obj, log_ids, args.dynamic, args.vuln_class, klass.title)
             else:
                 check_finding(obj, log_ids, ceiling)
+            if args.type == "hypothesis":
+                # Normalise to the identifier. An alias is accepted at the door and
+                # never survives it, so nothing downstream has to know about one.
+                obj = dict(obj, vuln_class=args.vuln_class)
             built.append(records.record(args.type, obj, src=args.src))
     except AdmitError as e:
         # Nothing is written: a batch is admitted whole or not at all, so a

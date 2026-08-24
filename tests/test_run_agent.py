@@ -133,7 +133,7 @@ class TestExtraction(unittest.TestCase):
 
 
 class TestFailureModes(unittest.TestCase):
-    """The two ways a run can produce nothing, neither of which is success."""
+    """The ways a run can come back incomplete, none of which is success."""
 
     def _cfg(self, tmp: Path, runners: dict) -> dict:
         (tmp / "runners.yaml").write_text(json.dumps({"default": "t", "runners": runners}))
@@ -179,6 +179,44 @@ class TestFailureModes(unittest.TestCase):
         r = run(["--agent", "hypothesize", "--runner", "stub"], "")
         self.assertNotEqual(r.returncode, 0)
         self.assertIn("nothing on stdin", r.stderr)
+
+    def test_fewer_records_than_cases_exits_nonzero(self):
+        """Observed on a 0.5B: four cases in, one record out, exit 0. The three
+        missing cases were never judged, and nothing downstream could tell them from
+        cases the model had considered and dismissed — the log is simply short, and
+        short reads as complete."""
+        one = json.dumps({"statement": "s", "vuln_class": "sqli", "status": "proposed",
+                          "confidence": 0.5, "evidence": ["f_" + "a" * 24]},
+                         separators=(",", ":"))
+        briefing = BRIEFING + "\n" + "\n".join(case_line(["f_" + "a" * 24]) for _ in range(4))
+        with tempfile.TemporaryDirectory() as d:
+            env = self._cfg(Path(d), {"t": {"cmd": ["echo", one]}})
+            r = run(["--agent", "hypothesize"], briefing, env)
+        self.assertEqual(r.returncode, 4)
+        self.assertIn("4 case(s) briefed but only 1", r.stderr)
+        self.assertIn("unjudged", r.stderr)
+
+    def test_one_record_per_case_is_success(self):
+        rec = json.dumps({"statement": "s", "vuln_class": "sqli", "status": "proposed",
+                          "confidence": 0.5, "evidence": ["f_" + "a" * 24]},
+                         separators=(",", ":"))
+        briefing = BRIEFING + "\n" + "\n".join(case_line(["f_" + "a" * 24]) for _ in range(2))
+        with tempfile.TemporaryDirectory() as d:
+            env = self._cfg(Path(d), {"t": {"cmd": ["printf", "%s\\n%s\\n", rec, rec]}})
+            r = run(["--agent", "hypothesize"], briefing, env)
+        self.assertEqual(r.returncode, 0, r.stderr)
+        self.assertEqual(json.loads(r.stderr.strip().splitlines()[-1])["cases"], 2)
+
+    def test_a_briefing_with_no_cases_is_not_short(self):
+        """`cases: 0` must not turn every run into a short count — the check is
+        about cases that went unjudged, not about briefings that carry none."""
+        rec = json.dumps({"statement": "s", "vuln_class": "sqli", "status": "proposed",
+                          "confidence": 0.5, "evidence": ["f_" + "a" * 24]},
+                         separators=(",", ":"))
+        with tempfile.TemporaryDirectory() as d:
+            env = self._cfg(Path(d), {"t": {"cmd": ["echo", rec]}})
+            r = run(["--agent", "hypothesize"], BRIEFING, env)
+        self.assertEqual(r.returncode, 0, r.stderr)
 
 
 class TestStubRunner(unittest.TestCase):
