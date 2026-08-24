@@ -77,7 +77,12 @@ def main(argv: list[str] | None = None) -> int:
     log = list(store.read())
     by_id = {r["id"]: r for r in log}
     findings = [r for r in log if r.get("type") == "finding"]
-    hyps = [r for r in log if r.get("type") == "hypothesis"]
+    # Leaves only. A traced log holds one hypothesis per level per site: counting the
+    # whole chain inflates every status tally, lists a refuted case once per level it
+    # was traced through, and makes "every candidate was refuted" fire on a set that
+    # is mostly its own history.
+    stale = store.revised_hypotheses(log)
+    hyps = [r for r in log if r.get("type") == "hypothesis" and r["id"] not in stale]
     refuted = [h for h in hyps if h.get("status") == "refuted"]
     beliefs = store.project()
     vc = load_class(args.vuln_class)

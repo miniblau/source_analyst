@@ -187,17 +187,6 @@ def callees_of(h: dict, by_id: dict[str, dict]) -> list[str]:
     return sorted(names)
 
 
-def superseded(log: list[dict]) -> set[str]:
-    """Hypotheses that a later revision has replaced — every id named as a parent.
-
-    A chain's leaf is the current state of that case; its ancestors are history.
-    Anything that reads "the hypotheses" and means "the case as it stands now" has
-    to drop them, or one site is counted once per level it was traced through.
-    """
-    return {h["parent"] for h in log
-            if h.get("type") == "hypothesis" and h.get("parent")}
-
-
 def traceable(log: list[dict], status: str, cfg: dict[str, Any]) -> list[dict]:
     """Hypotheses this round may descend into (§4.2).
 
@@ -210,7 +199,7 @@ def traceable(log: list[dict], status: str, cfg: dict[str, Any]) -> list[dict]:
     """
     hyps = [h for h in log if h.get("type") == "hypothesis"]
     by_id = {h["id"]: h for h in hyps}
-    has_child = superseded(log)
+    has_child = store.revised_hypotheses(log)
     out = []
     for h in hyps:
         if h.get("status") != status or h["id"] in has_child:
@@ -384,7 +373,7 @@ def main(argv: list[str] | None = None) -> int:
         # it was traced through, all of them at the same status: briefing the lot
         # writes the same site up once per level and the report reads as though the
         # substrate found twice what it found. Measured on WebGoat: 23 sites, 46 rows.
-        stale = superseded(log)
+        stale = store.revised_hypotheses(log)
         wanted = {h["id"]: h for h in log
                   if h.get("type") == "hypothesis" and h.get("status") == args.status
                   and h["id"] not in stale}

@@ -287,5 +287,19 @@ class TestATracedLogIsReadCorrectlyDownstream(unittest.TestCase):
         self.assertEqual([row["hypothesis"]["id"] for row in rows], [self.child["id"]])
 
 
+    def test_render_counts_a_revised_case_once(self):
+        """Counting the whole chain inflates every status tally in the summary, and
+        would make "every candidate was refuted" fire on a set that is mostly its own
+        history."""
+        r = subprocess.run(
+            [sys.executable, "-m", "source_analyst.lifecycle.render",
+             "--class", "sqli", "--target", "t"],
+            cwd=ROOT, env=self.env, capture_output=True, text=True)
+        self.assertEqual(r.returncode, 0, r.stderr)
+        self.assertIn("hypotheses: **1**", r.stdout)
+        self.assertIn("1 needs_proof", r.stdout)
+        self.assertNotIn("hypotheses: **2**", r.stdout)
+
+
 if __name__ == "__main__":
     unittest.main()

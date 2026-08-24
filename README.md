@@ -46,6 +46,7 @@ llama-server -m <model>.gguf -c 16384 --host 127.0.0.1 --port 8080 &
 export LLM_BASE_URL=http://127.0.0.1:8080/v1 SOURCE_ANALYST_RUNNER=openai_compat
 
 tools/pass.sh hypothesize sqli java 4
+tools/trace.sh /path/to/project sqli java 3      # optional: read the code, re-judge
 tools/pass.sh report      sqli java 5
 render --class sqli --target "Client Project" > report.md
 ```
@@ -53,6 +54,25 @@ render --class sqli --target "Client Project" > report.md
 `openai_compat` speaks to anything with an OpenAI-compatible `/chat/completions` —
 llama.cpp, Ollama's `/v1`, LM Studio, vLLM, a hosted API. Which one is
 `LLM_BASE_URL`, never a line in this repo.
+
+## Digging deeper
+
+`trace` is the only loop. Each turn the *substrate* decides which methods a
+hypothesis needs read — the sink, the sanitizer candidates, and every method the
+flow passes through — `callee_body` reads them into the log, and the agent re-judges
+with the source in front of it. Each revision becomes a child hypothesis plus one
+belief per trust verdict, so the log grows a tree and the belief store stops the next
+run re-litigating a sanitizer someone already audited.
+
+```bash
+tools/trace.sh /path/to/project sqli java 3
+tools/trace.sh /path/to/project sqli java 3 refuted   # re-examine the exclusions
+```
+
+Depth is bounded by `config/depth.yaml`: a hard `max`, and a `spend_gate` that
+descends only where the last level made the case *stronger*. The null baseline keeps
+confidence flat and so cannot buy itself another level, which is the property that
+makes the gate worth having.
 
 ## Measuring a model
 
@@ -75,8 +95,10 @@ model — separation is undefined when a model keeps no noise.
   expression or a config key is reachable by no manifest, only by a new query.
 - **Representative paths, not all routes.** "No clean path was reported" is never
   "every route is sanitized".
-- **Nobody reads a called method's body.** Agents judge the briefing they are given;
-  asking follow-up questions is the Phase 2 `trace` loop.
+- **A callee outside the tree stays unread.** `trace` reads the methods a flow
+  passes through, but a library or a dependency comes back `external_stub` — the
+  signature is known, the body is not. That is a gap in coverage, never evidence
+  that a call is harmless, and `admit` refuses a trust verdict based on one.
 - **No exploitation.** The v1 ceiling is `needs_proof` plus a writeup a human can
   follow in minutes.
 

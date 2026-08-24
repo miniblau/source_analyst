@@ -95,6 +95,16 @@ The substrate spine. Get this right and most of the system follows.
   So "no clean path was reported" is NOT "every route is sanitized" — that error makes a
   live vulnerability look safer. Scope any such count to what the engine returned and name
   the field accordingly (`reported_*`).
+- **A method node is not a method body.** `method.code` holds the *signature* only
+  (`"private String escape(String s)"`), so reading what a callee does means reading
+  the file: `cpg.metaData.root` + `method.file.name`, lines `lineNumber..lineNumberEnd`.
+  Verified on the flow fixture and on WebGoat. That the source has to be read off disk
+  is also why "no body" needs to be distinguishable from "the file moved".
+- **A library method still has a node.** `java.sql.Connection.prepareStatement` exists
+  in the CPG with `isExternal = true`, `lineNumber = None`, filename `<unknown>` and a
+  7-node AST of parameter stubs. So `.ast.size` is a bad has-a-body test, and — more
+  importantly — "not found" and "found but not readable" are *different answers*.
+  Collapsing them turns a gap in coverage into an apparent clean result.
 - **Node vocabulary is a hard boundary.** Every query today matches call nodes or annotated
   parameters. A sink that is neither — a JSX attribute, a template expression, a config key
   — cannot be reached by *any* manifest, only by a new query. Verified: `jssrc2cpg` builds a

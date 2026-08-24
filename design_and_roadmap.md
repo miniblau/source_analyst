@@ -535,6 +535,31 @@ orchestrator  (primary — "understands me")
 `orchestrator` is the assistant you talk to. Only `trace` iterates. All of them
 reach the substrate through the same JSONL tool contract (MCP or shell wrappers).
 
+**`agents/trace.md` — built 2026-08-24.** The loop. Each turn: the substrate reads
+the methods a hypothesis touches (`callee_body`), the agent re-judges with the source
+in front of it, and `admit --type trace` expands each revision into a child hypothesis
+plus one belief per verdict. Three things make it safe to iterate:
+
+  * **The reading list is not the agent's.** `brief --callees` derives it from the
+    hypothesis's own facts. A model choosing what to read would be steering the
+    deterministic layer, and a method name it invented would come back `not_in_cpg`
+    looking like a fact about the code.
+  * **A gap is not an acquittal.** `callee_body` distinguishes "the body says X" from
+    "the body is outside the tree", and `admit` refuses a trust verdict whose subject
+    was not actually *read* — citing an `external_stub` is not the same as reading it.
+    That distinction is the whole reason the query has a `status` field.
+  * **Depth costs something.** `config/depth.yaml` caps depth outright and, under
+    `rising_confidence`, funds another level only where the last one made the case
+    stronger. The stub runner keeps confidence flat and therefore cannot descend at
+    all — a floor that could buy depth for free would not be a floor.
+
+Adding a second level also changed what "the hypotheses" *means* to everything
+downstream: a traced log holds one hypothesis per level per site, all at the same
+status. `brief --agent report` and `score` now read **leaves**; `score --src` still
+grades what a named producer said, superseded or not, because those are two different
+questions and collapsing them would score the hypothesize leg at zero on any log that
+had been traced.
+
 **`agents/orchestrator.md` — written 2026-08-23.** Unlike the others it is a *driver*,
 not a producer: it runs CLIs and emits no records, so it has no `config/schemas/` entry
 and never passes through `admit`. Its prompt is mostly about the four ways a zero result
@@ -636,8 +661,11 @@ and corpus-validated. (An earlier draft of this line said SSRF; §10 wins on con
 orchestrator + hypothesize + report. No branching yet. Manual LLM gating. Output:
 findings with recreation flows. *This is the first useful deliverable.* Built:
 `brief` → `run_agent` → `admit` → `render` → `score`, proven end to end on WebGoat and
-in test against the stub runner. Remaining: the `orchestrator` prompt itself (§7 — the
-primary you talk to, not a Python tool), and a scorecard from a second model.
+in test against the stub runner. `agents/orchestrator.md` written 2026-08-23.
+**Phase 1 is complete.**
+
+A second model was run against the same 348-fact substrate on 2026-08-24, and the
+apparatus discriminated — which is the whole reason for having it. See §8.1.
 
 Phase 1 deliberately runs against **one class in one language**. The agent layer is the
 only nondeterministic component in the system; introducing it against a substrate whose
@@ -651,9 +679,29 @@ not just eyeballed. Breadth waits (decided 2026-08-21).
 manifest and must never name a vuln class themselves. If a prompt contains the word
 "SQL", that is a bug. The running check is "would this prompt work unchanged for SSRF?"
 
-**Phase 2 — Branching + learning.**
+**Phase 2 — Branching + learning. IN PROGRESS (started 2026-08-24).**
 `trace` subagent, hypothesis tree, `spend_gate`, `checkpoint` subagent, belief-store
 trust decisions. This is where it starts feeling like you.
+
+Built: `queries/callee_body.sc` (a method's real source, its parameters' resolved
+types, and the calls it makes — with a `status` separating `resolved` from
+`external_stub` / `source_unavailable` / `not_in_cpg`, because an empty answer is
+four different answers); `agents/trace.md` + `config/schemas/trace.json`;
+`brief --agent trace` and its `--callees` reading-list emitter; `admit --type trace`,
+which expands one revision into a child hypothesis plus one belief per verdict;
+`config/depth.yaml`; `tools/trace.sh`, the draining loop.
+
+The reading list is chosen by the substrate, never by the agent — the sink, the
+sanitizer candidates, and every method the flow passes through. That last part was
+not the obvious design and the corpus corrected it: on WebGoat SQLi every sink and
+every sanitizer candidate resolves into `java.sql` or `java.lang` and has no body in
+the tree, so a list of those alone returns eight stubs and teaches the agent nothing.
+27 of 35 in-tree methods resolve, including `SqlInjectionLesson8.log()`.
+
+Not yet built: the `checkpoint` agent (the human-in-loop depth gate, §4.2 — the value
+is in `config/depth.yaml` and read by nothing; a run today is bounded by `max` and the
+spend gate alone), and re-tracing at `--status refuted` has the machinery but has not
+been run against a real model.
 
 **Phase 3 — Breadth.**
 More manifests and rule sets (js, swift). Cross-substrate stitching for Joern-blind

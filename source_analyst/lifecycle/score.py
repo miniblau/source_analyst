@@ -212,8 +212,7 @@ def score(log: list[dict], truth: dict, vuln_class: str, src: str | None) -> dic
     #                     and feeds calibration duplicate points that inflate n.
     #
     # Measured on a traced WebGoat log: 49 scored over 26 sites.
-    stale = ({h["parent"] for h in log
-              if h.get("type") == "hypothesis" and h.get("parent")} if src is None else set())
+    stale = store.revised_hypotheses(log) if src is None else set()
     mine = [r for r in log if r.get("type") == "hypothesis"
             and (src is None or r.get("src") == src)
             and r["id"] not in stale]

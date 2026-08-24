@@ -123,6 +123,18 @@ def project(path: Path | None = None) -> dict[tuple[str, str, str], dict[str, An
     return out
 
 
+def revised_hypotheses(log: list[dict[str, Any]]) -> set[str]:
+    """Ids of hypotheses a later revision has replaced — every id named as a `parent`.
+
+    A chain's leaf is the case as it stands; its ancestors are history. Anything that
+    reads "the hypotheses" and means "the cases" has to drop them, or one site is
+    counted once per level `trace` took it through. Three readers got this wrong the
+    day branching landed, which is why it lives here and not in any one of them.
+    """
+    return {h["parent"] for h in log
+            if h.get("type") == "hypothesis" and h.get("parent")}
+
+
 def superseded(path: Path | None = None) -> dict[tuple[str, str, str], int]:
     """How many earlier verdicts each live belief replaced — the audit trail the
     projection hides. A key revised repeatedly is a signal in itself."""
