@@ -234,6 +234,13 @@ def traceable(log: list[dict], status: str, cfg: dict[str, Any]) -> list[dict]:
     return sorted(out, key=lambda h: h["id"])
 
 
+def _slim_evidence(f: dict) -> dict:
+    """A fact as an agent should see it: path steps carry forward, as in `_cases`."""
+    if not f.get("steps"):
+        return f
+    return {**f, "steps": _slim_steps(f["steps"])}
+
+
 def _slim_callee(c: dict) -> dict:
     """Drop what the body already says.
 
@@ -249,9 +256,21 @@ def _slim_callee(c: dict) -> dict:
     if c.get("status") != "resolved" or not str(c.get("body", "")).strip():
         return c
     out = {k: v for k, v in c.items() if k != "statements"}
-    out["calls"] = [{"name": x.get("name"), "full_name": x.get("full_name"),
-                     "line": x.get("line"), "resolved": x.get("resolved")}
-                    for x in c.get("calls", []) if not x.get("is_operator")]
+    # Deduped: a lesson method calls `build`, `feedback` and `failed` three or four
+    # times each, and the list repeats every one. What a reader needs is *which*
+    # methods this one calls and whether the frontend resolved them — that is a set,
+    # not a sequence, and the sequence is in the body anyway.
+    seen: dict[tuple, dict] = {}
+    for x in c.get("calls", []):
+        if x.get("is_operator"):
+            continue
+        key = (x.get("name"), x.get("full_name"))
+        if key in seen:
+            seen[key]["times"] += 1
+            continue
+        seen[key] = {"name": x.get("name"), "full_name": x.get("full_name"),
+                     "line": x.get("line"), "resolved": x.get("resolved"), "times": 1}
+    out["calls"] = list(seen.values())
     # Say what was dropped, so a short list is not read as a short method.
     out["calls_omitted_operators"] = sum(1 for x in c.get("calls", []) if x.get("is_operator"))
     return out
@@ -271,7 +290,11 @@ def _trace_rows(log: list[dict], status: str, cfg: dict[str, Any]) -> list[dict]
             "kind": "trace_case",
             "hypothesis": {k: h.get(k) for k in
                            ("id", "statement", "status", "confidence", "depth", "parent")},
-            "evidence": [by_id[e] for e in h.get("evidence", []) if e in by_id],
+            # Same step-slimming the flat pass gets: on a trace briefing the path
+            # steps were 36% of the whole thing, and a step repeats the previous
+            # step's file and fully-qualified method far more often than not.
+            "evidence": [_slim_evidence(by_id[e]) for e in h.get("evidence", [])
+                         if e in by_id],
             # One entry per method asked for, present or not. A callee the substrate
             # could not read is a GAP, and it must be visible as one — an agent that
             # sees a short list infers the missing ones were unremarkable.
