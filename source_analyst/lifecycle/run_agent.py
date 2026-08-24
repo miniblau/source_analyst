@@ -148,19 +148,31 @@ def extract(stdout: str) -> tuple[list[dict], list[str]]:
     return objs, junk
 
 
+# Every agent is briefed one work item per row, but the rows are not all called
+# `case`: hypothesize gets `case`, report and trace get a row per hypothesis. The
+# briefing header states the count outright, which is agent-agnostic and survives
+# a new agent with a row kind nobody here has heard of.
+WORK_ROW_KINDS = ("case", "hypothesis", "trace_case")
+
+
 def count_cases(briefing: str) -> int:
-    """How many cases the agent was handed. The briefing is JSONL and says so."""
-    n = 0
+    """How many work items the agent was handed. The briefing is JSONL and says so."""
+    counted = 0
     for line in briefing.splitlines():
         line = line.strip()
         if not line.startswith("{"):
             continue
         try:
-            if json.loads(line).get("kind") == "case":
-                n += 1
+            obj = json.loads(line)
         except ValueError:
             continue
-    return n
+        if obj.get("kind") == "briefing":
+            rows = (obj.get("chunk") or {}).get("rows")
+            if isinstance(rows, int):
+                return rows
+        if obj.get("kind") in WORK_ROW_KINDS:
+            counted += 1
+    return counted
 
 
 def transcript_dir() -> Path:

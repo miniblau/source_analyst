@@ -8,7 +8,15 @@ tool refuses anything that asserts more than the substrate can support:
     architecture exists to prevent;
   * `confirmed` is refused while the run is static-only (§4 v1 ceiling);
   * a finding's tier may not exceed the class ceiling from the manifest;
-  * a finding must point at a hypothesis that exists.
+  * a finding must point at a hypothesis that exists;
+  * a trace revision must point at a parent hypothesis that exists, and every
+    trust verdict it records must name a method the agent was actually SHOWN —
+    a belief about code nobody read is the same hallucination wearing a hat.
+
+One agent record is not always one log record. `--type trace` takes the shape the
+agent speaks in — a revised case — and expands it into the records the log speaks
+in: one child hypothesis plus one belief per verdict. The expansion is mechanical;
+this tool still decides nothing.
 
 It makes no LLM call and forms no opinion. Reads JSONL on stdin.
 """
@@ -36,6 +44,8 @@ HYPOTHESIS_FIELDS = ("statement", "vuln_class", "status", "confidence", "evidenc
 # with no caveats at all, because the output schema forbade the field the prompt
 # demanded. Prompts request; the gate enforces.
 FINDING_FIELDS = ("hypothesis", "tier", "severity", "recreation", "refs", "title", "caveats")
+TRACE_FIELDS = ("parent", "statement", "vuln_class", "status", "confidence",
+                "evidence", "basis")
 SEVERITIES = ("info", "low", "medium", "high", "critical")
 
 
@@ -62,6 +72,98 @@ def _class_aliases(vuln_class: str, class_title: str | None) -> set[str]:
     """Spellings of a class that mean the class. Both come from its manifest, so a
     new class adds no code here and no entry anywhere else."""
     return {vuln_class} | ({class_title} if class_title else set())
+
+
+
+def verdict_vocab() -> dict[str, Any]:
+    env = os.environ.get("SOURCE_ANALYST_CONFIG")
+    base = Path(env).expanduser().resolve() if env else repo_root() / "config"
+    path = base / "verdicts.yaml"
+    if not path.is_file():
+        raise AdmitError(f"missing verdict vocabulary: {path}")
+    return yaml.safe_load(path.read_text())
+
+
+def check_trace(obj: dict, log_recs: dict[str, dict], dynamic: bool,
+                vuln_class: str | None = None, class_title: str | None = None) -> None:
+    """A revised hypothesis, plus whatever trust decisions reading the code produced."""
+    _require(obj, TRACE_FIELDS, "trace revision")
+    log_ids = {k: v.get("type", "?") for k, v in log_recs.items()}
+    check_hypothesis(obj, log_ids, dynamic, vuln_class, class_title)
+
+    parent = log_recs.get(obj["parent"])
+    if parent is None or parent.get("type") != "hypothesis":
+        raise AdmitError(
+            f"trace revision names parent {obj['parent']!r}, which is not a hypothesis "
+            f"in the log — a revision with no ancestor is a new hypothesis, not a child")
+
+    # What the agent was actually shown: the callee bodies among its own cited facts.
+    # A verdict about anything else is a judgement of code that was never read, which
+    # is the failure this whole leg was built to end.
+    read = {}
+    for fid in obj["evidence"]:
+        rec = log_recs.get(fid, {})
+        if rec.get("kind") == "callee_body":
+            read[rec.get("full_name", "")] = rec
+
+    vocab = verdict_vocab()
+    seen = set()
+    for v in obj.get("verdicts") or []:
+        if not isinstance(v, dict):
+            raise AdmitError("each verdict must be an object")
+        for field in ("subject", "verdict", "rationale"):
+            if not str(v.get(field, "")).strip():
+                raise AdmitError(f"verdict is missing required field: {field}")
+        if v["verdict"] not in vocab:
+            raise AdmitError(
+                f"unknown verdict {v['verdict']!r}; expected one of {', '.join(sorted(vocab))}")
+        if v["subject"] not in read:
+            raise AdmitError(
+                f"verdict names subject {v['subject']!r}, but no callee_body fact for it "
+                f"is cited in this revision's evidence — a trust decision about a method "
+                f"nobody read is a hallucination, and it would be believed by every "
+                f"later run")
+        if read[v["subject"]].get("status") != "resolved":
+            # The signature was known and the body was not. Recording a verdict off
+            # that is exactly the gap-as-acquittal the prompt warns about.
+            raise AdmitError(
+                f"verdict names subject {v['subject']!r}, whose body was not read "
+                f"(callee_body status {read[v['subject']].get('status')!r}) — a gap in "
+                f"coverage is not a trust decision")
+        if v["subject"] in seen:
+            raise AdmitError(f"two verdicts for the same subject {v['subject']!r}")
+        seen.add(v["subject"])
+
+
+def expand_trace(obj: dict, log_recs: dict[str, dict], vuln_class: str,
+                 src: str) -> list[dict]:
+    """One revised case -> one child hypothesis + one belief per verdict."""
+    parent = log_recs[obj["parent"]]
+    payload = {
+        "statement": obj["statement"],
+        "vuln_class": vuln_class,
+        "status": obj["status"],
+        "confidence": obj["confidence"],
+        "evidence": obj["evidence"],
+        "parent": obj["parent"],
+        "depth": int(parent.get("depth", 0) or 0) + 1,
+        "basis": obj["basis"],
+        "read": obj.get("read") or [],
+    }
+    out = [records.record("hypothesis", payload, src=src)]
+    for v in obj.get("verdicts") or []:
+        out.append(records.belief(
+            subject=v["subject"],
+            # Fixed for this leg: the question trace answers about a method is always
+            # whether it defends the class under review. The class is data; the
+            # predicate is the shape of the question, and is not the agent's to pick.
+            predicate="sanitizes",
+            object_=vuln_class,
+            verdict=v["verdict"],
+            rationale=v["rationale"],
+            audited_by=src,
+        ))
+    return out
 
 
 def check_hypothesis(obj: dict, log_ids: dict[str, str], dynamic: bool,
@@ -132,7 +234,9 @@ def check_finding(obj: dict, log_ids: dict[str, str], ceiling: str) -> None:
 def main(argv: list[str] | None = None) -> int:
     p = argparse.ArgumentParser(prog="admit", description=__doc__,
                                 formatter_class=argparse.RawDescriptionHelpFormatter)
-    p.add_argument("--type", required=True, choices=("hypothesis", "finding"))
+    p.add_argument("--type", required=True, choices=("hypothesis", "finding", "trace"),
+                   help="`trace` takes a revised case and expands it into a child\n"
+                        "hypothesis plus one belief per verdict")
     p.add_argument("--class", dest="vuln_class", required=True)
     p.add_argument("--lang", required=True)
     p.add_argument("--src", required=True,
@@ -160,20 +264,24 @@ def main(argv: list[str] | None = None) -> int:
     if not objs:
         raise SystemExit("admit: nothing on stdin")
 
-    log_ids = {r["id"]: r.get("type", "?") for r in store.read()}
+    log_recs = {r["id"]: r for r in store.read()}
+    log_ids = {k: v.get("type", "?") for k, v in log_recs.items()}
 
     built = []
     try:
         for obj in objs:
             if args.type == "hypothesis":
                 check_hypothesis(obj, log_ids, args.dynamic, args.vuln_class, klass.title)
-            else:
-                check_finding(obj, log_ids, ceiling)
-            if args.type == "hypothesis":
                 # Normalise to the identifier. An alias is accepted at the door and
                 # never survives it, so nothing downstream has to know about one.
-                obj = dict(obj, vuln_class=args.vuln_class)
-            built.append(records.record(args.type, obj, src=args.src))
+                built.append(records.record(
+                    args.type, dict(obj, vuln_class=args.vuln_class), src=args.src))
+            elif args.type == "trace":
+                check_trace(obj, log_recs, args.dynamic, args.vuln_class, klass.title)
+                built.extend(expand_trace(obj, log_recs, args.vuln_class, args.src))
+            else:
+                check_finding(obj, log_ids, ceiling)
+                built.append(records.record(args.type, obj, src=args.src))
     except AdmitError as e:
         # Nothing is written: a batch is admitted whole or not at all, so a
         # partially-validated set of judgements never lands in the log.
@@ -182,7 +290,11 @@ def main(argv: list[str] | None = None) -> int:
     if not args.dry_run:
         store.append(built)
         records.write_jsonl(built, sys.stdout)
+    by_type: dict[str, int] = {}
+    for rec in built:
+        by_type[rec["type"]] = by_type.get(rec["type"], 0) + 1
     print(json.dumps({"cmd": "admit", "type": args.type, "admitted": len(built),
+                      "cases": len(objs), "by_type": dict(sorted(by_type.items())),
                       "dry_run": bool(args.dry_run), "ceiling": ceiling,
                       "src": args.src}, separators=(",", ":")), file=sys.stderr)
     return 0

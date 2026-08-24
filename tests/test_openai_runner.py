@@ -179,6 +179,13 @@ class TestSchemasMatchTheGate(unittest.TestCase):
         doc = json.loads((ROOT / "config" / "schemas" / f"{agent}.json").read_text())
         return doc["properties"]["records"]["items"]
 
+    @property
+    def agents(self):
+        """Every agent `brief` can brief — not a list typed here. A hardcoded tuple
+        let `trace` slip past three of these checks the day it was added."""
+        from source_analyst.lifecycle.brief import INSTRUCTIONS
+        return sorted(INSTRUCTIONS)
+
     def test_hypothesis_schema_requires_what_admit_requires(self):
         from source_analyst.lifecycle.admit import HYPOTHESIS_FIELDS
         required = set(self.load("hypothesize")["required"])
@@ -212,7 +219,7 @@ class TestSchemasMatchTheGate(unittest.TestCase):
         honest. No error anywhere — just a blank heading in the rendered markdown.
         A prompt and a grammar that disagree fail silently, so check mechanically.
         """
-        for agent in ("hypothesize", "report"):
+        for agent in self.agents:
             text = (ROOT / "agents" / f"{agent}.md").read_text()
             block = re.search(r"```json\n(.*?)```", text, re.S)
             self.assertIsNotNone(block, f"{agent}.md has no JSON example to check")
@@ -228,7 +235,7 @@ class TestSchemasMatchTheGate(unittest.TestCase):
         one batch on a real run spent all 4096 tokens looping inside a field and
         came back as truncated JSON. Bounds shrink the blast radius; they do not
         make the failure impossible, which is why the shim also diagnoses it."""
-        for agent in ("hypothesize", "report"):
+        for agent in self.agents:
             items = self.load(agent)
             for name, spec in items["properties"].items():
                 if spec.get("type") == "string" and "enum" not in spec:
@@ -236,6 +243,20 @@ class TestSchemasMatchTheGate(unittest.TestCase):
             doc = json.loads((ROOT / "config" / "schemas" / f"{agent}.json").read_text())
             self.assertIn("maxItems", doc["properties"]["records"],
                           f"{agent} record array is unbounded")
+
+    def test_trace_schema_requires_what_admit_requires(self):
+        from source_analyst.lifecycle.admit import TRACE_FIELDS
+        required = set(self.load("trace")["required"])
+        self.assertTrue(set(TRACE_FIELDS) <= required,
+                        f"schema is missing {set(TRACE_FIELDS) - required}")
+
+    def test_trace_verdict_enum_is_the_config_vocabulary(self):
+        """A verdict the grammar can emit but the gate refuses is a batch thrown away
+        for a spelling; one the gate accepts but the grammar cannot emit is a trust
+        decision that can never be recorded. Both are silent."""
+        vocab = yaml.safe_load((ROOT / "config" / "verdicts.yaml").read_text())
+        offered = self.load("trace")["properties"]["verdicts"]["items"]["properties"]
+        self.assertEqual(set(offered["verdict"]["enum"]), set(vocab))
 
     def test_severity_enum_matches_admit(self):
         from source_analyst.lifecycle.admit import SEVERITIES

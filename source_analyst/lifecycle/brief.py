@@ -16,11 +16,16 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
 import sys
+from pathlib import Path
 from typing import Any
+
+import yaml
 
 from .. import records
 from ..belief import store
+from ..cpg.workspace import repo_root
 from ..manifest.loader import ManifestError, load_class, load_patterns, tier_table
 
 CASE_KEY = ("sink_file", "sink_line", "source_file", "source_line", "source_name")
@@ -128,6 +133,115 @@ def _beliefs_for(cases: list[dict]) -> list[dict]:
             if any(n and n in key[0] for n in names) or key[0] in names]
 
 
+
+# --------------------------------------------------------------------- trace
+
+def depth_config() -> dict[str, Any]:
+    env = os.environ.get("SOURCE_ANALYST_CONFIG")
+    base = Path(env).expanduser().resolve() if env else repo_root() / "config"
+    path = base / "depth.yaml"
+    if not path.is_file():
+        raise SystemExit(f"brief: missing depth control config: {path}")
+    doc = yaml.safe_load(path.read_text()) or {}
+    d = doc.get("depth") or {}
+    gate = d.get("spend_gate", "rising_confidence")
+    if gate not in ("rising_confidence", "always"):
+        raise SystemExit(f"brief: config/depth.yaml: unknown spend_gate {gate!r}")
+    return {"max": int(d.get("max", 3)), "spend_gate": gate,
+            "checkpoint_every": int(d.get("checkpoint_every", 0))}
+
+
+def callees_of(h: dict, by_id: dict[str, dict]) -> list[str]:
+    """Which methods this hypothesis needs read, decided mechanically from its own
+    evidence — the sink it lands in, and every sanitizer candidate on the path.
+
+    The SUBSTRATE picks what to read, not the model. An agent that chose its own
+    reading list would be steering the deterministic layer, and a name it invented
+    would come back `not_in_cpg` looking like a fact about the code.
+    """
+    names: set[str] = set()
+    for fid in h.get("evidence", []):
+        f = by_id.get(fid)
+        if not f:
+            continue
+        # The sink itself, and every candidate sanitizer on the path. On a JDK-heavy
+        # class these are mostly library methods and come back `external_stub` — a
+        # stated gap, which is the honest answer and not the same as "nothing there".
+        if f.get("sink_full_name"):
+            names.add(f["sink_full_name"])
+        for cand in f.get("candidate_sanitizers", []) or []:
+            if cand.get("full_name"):
+                names.add(cand["full_name"])
+        # The methods the flow actually passes THROUGH, which is where the readable
+        # code lives. Measured on WebGoat SQLi: every sink and every sanitizer
+        # candidate resolves into java.sql or java.lang and has no body in the tree,
+        # so a reading list of those alone would have returned eight stubs and taught
+        # the agent nothing. `subject` and `object` are the enclosing methods of the
+        # source and the sink; the steps carry each hop between them.
+        for key in ("subject", "object"):
+            if f.get(key):
+                names.add(f[key])
+        for step in f.get("steps", []) or []:
+            if step.get("method"):
+                names.add(step["method"])
+    return sorted(names)
+
+
+def traceable(log: list[dict], status: str, cfg: dict[str, Any]) -> list[dict]:
+    """Hypotheses this round may descend into (§4.2).
+
+    Three gates, and each one is a different reason to stop:
+      * a leaf only — a hypothesis that already has a child was traced already,
+        and re-tracing it would fork the tree instead of deepening it;
+      * `depth < max` — the hard stop, without which "and what does THAT call"
+        never terminates;
+      * the spend gate — descend only where the last level made the case stronger.
+    """
+    hyps = [h for h in log if h.get("type") == "hypothesis"]
+    by_id = {h["id"]: h for h in hyps}
+    has_child = {h["parent"] for h in hyps if h.get("parent")}
+    out = []
+    for h in hyps:
+        if h.get("status") != status or h["id"] in has_child:
+            continue
+        depth = int(h.get("depth", 0) or 0)
+        if depth >= cfg["max"]:
+            continue
+        if cfg["spend_gate"] == "rising_confidence":
+            parent = by_id.get(h.get("parent") or "")
+            if parent is not None and float(h.get("confidence", 0)) <= float(
+                    parent.get("confidence", 0)):
+                # The last level cost budget and did not make the case stronger.
+                # Descending again is how a rabbit hole eats an afternoon.
+                continue
+        out.append(h)
+    return sorted(out, key=lambda h: h["id"])
+
+
+def _trace_rows(log: list[dict], status: str, cfg: dict[str, Any]) -> list[dict]:
+    by_id = {r["id"]: r for r in log}
+    bodies: dict[str, dict] = {}
+    for f in log:
+        if f.get("kind") == "callee_body":
+            # Latest wins: a re-run after a source change supersedes the old read.
+            bodies[f.get("full_name", "")] = f
+    rows = []
+    for h in traceable(log, status, cfg):
+        wanted = callees_of(h, by_id)
+        rows.append({
+            "kind": "trace_case",
+            "hypothesis": {k: h.get(k) for k in
+                           ("id", "statement", "status", "confidence", "depth", "parent")},
+            "evidence": [by_id[e] for e in h.get("evidence", []) if e in by_id],
+            # One entry per method asked for, present or not. A callee the substrate
+            # could not read is a GAP, and it must be visible as one — an agent that
+            # sees a short list infers the missing ones were unremarkable.
+            "callees": [bodies.get(n, {"full_name": n, "status": "not_queried"})
+                        for n in wanted],
+        })
+    return rows
+
+
 INSTRUCTIONS = {
     "hypothesize": [
         "Every claim about reachability, dataflow or call edges MUST come from a case's"
@@ -142,6 +256,19 @@ INSTRUCTIONS = {
         " database call at all should be refuted, and say why.",
         "Do not name the vuln class from your own knowledge — the narrative above is the"
         " only description of it you are given.",
+    ],
+    "trace": [
+        "You are shown a method's real source. Argue from what the code does — the"
+        " calls it makes, the type of the value it receives — and never from what a"
+        " file, package or method is named. A name is the weakest argument there is.",
+        "A callee with status `external_stub`, `not_in_cpg`, `source_unavailable` or"
+        " `not_queried` was NOT read. That is a gap in coverage, never evidence that"
+        " the code is harmless; if the gap is what decides the case, say `inconclusive`.",
+        "Deciding a sanitizer works is a belief, not a fact: give a verdict from the"
+        " vocabulary and a rationale that quotes the code you read.",
+        "Confidence must move for a stated reason. If the body changed nothing, keep"
+        " the number and say what you looked for and did not find.",
+        "Every fact id you cite must be one you were given, including the callee bodies.",
     ],
     "report": [
         "One finding per hypothesis you are given; do not invent hypotheses.",
@@ -160,19 +287,28 @@ def main(argv: list[str] | None = None) -> int:
     p.add_argument("--class", dest="vuln_class", required=True)
     p.add_argument("--lang", required=True)
     p.add_argument("--limit", type=int, help="first N cases only (for a cheap dry run)")
-    p.add_argument("--status", default="proposed",
-                   help="report agent: which hypothesis status to brief on")
+    p.add_argument("--status",
+                   help="report/trace agents: which hypothesis status to brief on"
+                        " (default: proposed for report, needs_proof for trace)")
     p.add_argument("--chunk-size", type=int, metavar="N",
                    help="emit rows in batches of N; see --chunk")
     p.add_argument("--chunk", type=int, default=0, metavar="I",
                    help="which batch to emit, 0-based (default 0)")
     p.add_argument("--chunks", action="store_true",
                    help="print how many batches --chunk-size yields, and exit")
+    p.add_argument("--callees", action="store_true",
+                   help="trace agent: emit a callee_body params object and exit, so the"
+                        " substrate can be asked for the bodies BEFORE the briefing is"
+                        " assembled (`brief --callees | cpg query --params-from -`)")
     args = p.parse_args(argv)
     if args.chunk_size is not None and args.chunk_size < 1:
         raise SystemExit("brief: --chunk-size must be at least 1")
     if args.chunk and args.chunk_size is None:
         raise SystemExit("brief: --chunk needs --chunk-size")
+    if args.callees and args.agent != "trace":
+        raise SystemExit("brief: --callees is only meaningful for --agent trace")
+    if args.status is None:
+        args.status = "needs_proof" if args.agent == "trace" else "proposed"
 
     try:
         vc = load_class(args.vuln_class)
@@ -181,6 +317,25 @@ def main(argv: list[str] | None = None) -> int:
         raise SystemExit(f"brief: {e}")
 
     log = list(store.read())
+
+    if args.callees:
+        cfg = depth_config()
+        by_id = {r["id"]: r for r in log}
+        wanted = sorted({n for h in traceable(log, args.status, cfg)
+                         for n in callees_of(h, by_id)})
+        if not wanted:
+            # A params object with no methods would make `callee_body` throw, which
+            # is the right end but the wrong message. Say which of the two happened:
+            # no hypothesis was eligible, or the eligible ones named no callee.
+            raise SystemExit(
+                f"brief: nothing to read — no hypothesis at status {args.status!r} is"
+                f" eligible to descend (depth max {cfg['max']}, spend_gate"
+                f" {cfg['spend_gate']}), or none names a callee")
+        print(json.dumps({"methods": wanted}, ensure_ascii=False, separators=(",", ":")))
+        print(json.dumps({"cmd": "brief", "agent": "trace", "callees": len(wanted),
+                          "status": args.status, "log": str(store.log_path())},
+                         separators=(",", ":")), file=sys.stderr)
+        return 0
     tiers = tier_table()
     ceiling = patterns.max_static_tier
 
@@ -204,6 +359,15 @@ def main(argv: list[str] | None = None) -> int:
         if args.limit:
             rows = rows[:args.limit]
         header["status_filter"] = None
+    elif args.agent == "trace":
+        cfg = depth_config()
+        rows = _trace_rows(log, args.status, cfg)
+        if args.limit:
+            rows = rows[:args.limit]
+        header["status_filter"] = args.status
+        header["depth"] = cfg
+        # The trust vocabulary is data; the agent must pick from it, not invent one.
+        header["verdicts"] = {k: v.get("claim", "") for k, v in store.verdicts().items()}
     else:
         wanted = {h["id"]: h for h in log
                   if h.get("type") == "hypothesis" and h.get("status") == args.status}

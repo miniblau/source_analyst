@@ -1,0 +1,252 @@
+"""The trace loop: the only iterating agent (design §4.1, §4.2).
+
+Two halves, both deterministic and both tested with zero model calls: which
+hypotheses a level may descend into, and what a revision is allowed to assert.
+
+The gates are the whole value here, so each one is tested from both sides — a
+gate that cannot refuse is decoration.
+"""
+
+import json
+import os
+import subprocess
+import sys
+import tempfile
+import unittest
+from pathlib import Path
+
+from source_analyst import records
+from source_analyst.belief import store
+from source_analyst.lifecycle.brief import callees_of, traceable
+
+ROOT = Path(__file__).resolve().parents[1]
+CFG = {"max": 3, "spend_gate": "rising_confidence", "checkpoint_every": 2}
+
+
+def hyp(hid, status="needs_proof", confidence=0.5, depth=0, parent=None, evidence=()):
+    return {"type": "hypothesis", "id": hid, "status": status, "statement": "s",
+            "confidence": confidence, "depth": depth, "parent": parent,
+            "evidence": list(evidence), "vuln_class": "sqli"}
+
+
+class TestTraceable(unittest.TestCase):
+    """Three gates, three different reasons to stop. None substitutes for another."""
+
+    def test_a_leaf_is_traceable(self):
+        self.assertEqual([h["id"] for h in traceable([hyp("h_a")], "needs_proof", CFG)],
+                         ["h_a"])
+
+    def test_a_hypothesis_with_a_child_is_not_retraced(self):
+        """Re-tracing a node that already has a child forks the tree sideways
+        instead of deepening it, and doubles the spend for no new depth."""
+        log = [hyp("h_a"), hyp("h_b", parent="h_a", depth=1, confidence=0.9)]
+        self.assertEqual([h["id"] for h in traceable(log, "needs_proof", CFG)], ["h_b"])
+
+    def test_the_wrong_status_is_not_traced(self):
+        self.assertEqual(traceable([hyp("h_a", status="refuted")], "needs_proof", CFG), [])
+
+    def test_refuted_can_be_traced_deliberately(self):
+        """Re-examining exclusions is the point of having the body: a refutation is
+        exactly the judgement a reviewer most wants a second look at."""
+        self.assertEqual([h["id"] for h in
+                          traceable([hyp("h_a", status="refuted")], "refuted", CFG)], ["h_a"])
+
+    def test_max_depth_is_a_hard_stop(self):
+        self.assertEqual(traceable([hyp("h_a", depth=3)], "needs_proof", CFG), [])
+        self.assertEqual([h["id"] for h in traceable([hyp("h_a", depth=2)], "needs_proof", CFG)],
+                         ["h_a"])
+
+    def test_spend_gate_starves_a_level_that_did_not_help(self):
+        """`rising_confidence`: a level costs budget, so paying for another one after
+        the last made the case no stronger is how a rabbit hole eats an afternoon."""
+        log = [hyp("h_a", confidence=0.7),
+               hyp("h_b", parent="h_a", depth=1, confidence=0.7)]
+        self.assertEqual(traceable(log, "needs_proof", CFG), [])
+
+    def test_spend_gate_funds_a_level_that_helped(self):
+        log = [hyp("h_a", confidence=0.7),
+               hyp("h_b", parent="h_a", depth=1, confidence=0.8)]
+        self.assertEqual([h["id"] for h in traceable(log, "needs_proof", CFG)], ["h_b"])
+
+    def test_spend_gate_can_be_disabled(self):
+        log = [hyp("h_a", confidence=0.7),
+               hyp("h_b", parent="h_a", depth=1, confidence=0.4)]
+        cfg = dict(CFG, spend_gate="always")
+        self.assertEqual([h["id"] for h in traceable(log, "needs_proof", cfg)], ["h_b"])
+
+
+class TestCalleeSelection(unittest.TestCase):
+    """What gets read is decided by the substrate, from the hypothesis's own facts."""
+
+    def _fact(self, **kw):
+        payload = {"kind": "flow", "subject": "p.C.handler:R(S)", "object": "p.C.run:R(S)",
+                   "sink_full_name": "java.sql.Statement.executeQuery:R(S)",
+                   "steps": [{"method": "p.C.handler:R(S)"}, {"method": "p.Helper.clean:S(S)"}]}
+        payload.update(kw)
+        return records.fact(payload, "cpg:reachable")
+
+    def test_reading_list_covers_the_methods_the_flow_passes_through(self):
+        """Measured on WebGoat SQLi: every sink and every sanitizer candidate resolves
+        into java.sql or java.lang and has no body in the tree. A reading list of
+        those alone came back eight stubs and taught the agent nothing — the readable
+        code is in the methods the flow crosses."""
+        f = self._fact()
+        got = callees_of(hyp("h_a", evidence=[f["id"]]), {f["id"]: f})
+        self.assertIn("p.Helper.clean:S(S)", got)
+        self.assertIn("p.C.handler:R(S)", got)
+        self.assertIn("p.C.run:R(S)", got)
+        self.assertIn("java.sql.Statement.executeQuery:R(S)", got)
+
+    def test_sanitizer_candidates_are_read(self):
+        f = self._fact(kind="sanitizer_check",
+                       candidate_sanitizers=[{"full_name": "p.Helper.escape:S(S)"}])
+        self.assertIn("p.Helper.escape:S(S)",
+                      callees_of(hyp("h_a", evidence=[f["id"]]), {f["id"]: f}))
+
+    def test_evidence_that_is_not_in_the_log_is_skipped_not_invented(self):
+        self.assertEqual(callees_of(hyp("h_a", evidence=["f_nope"]), {}), [])
+
+
+class TestAdmitTrace(unittest.TestCase):
+    """What a revision may assert. `admit` is still the only door."""
+
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(self.tmp.cleanup)
+        self.log = Path(self.tmp.name) / "log.jsonl"
+        self.env = dict(os.environ, SOURCE_ANALYST_LOG=str(self.log))
+
+        self.flow = records.fact(
+            {"kind": "flow", "subject": "p.C.h:R(S)", "object": "p.C.q:R(S)",
+             "sink_file": "A.java", "sink_line": 20,
+             "sink_full_name": "java.sql.Statement.executeQuery:R(S)"}, "cpg:reachable")
+        self.body = records.fact(
+            {"kind": "callee_body", "full_name": "p.Helper.escape:S(S)", "status": "resolved",
+             "name": "escape", "body": "return s.replace(\"x\", \"y\");"}, "cpg:callee_body")
+        self.stub = records.fact(
+            {"kind": "callee_body", "full_name": "java.sql.Statement.executeQuery:R(S)",
+             "status": "external_stub", "name": "executeQuery", "body": ""}, "cpg:callee_body")
+        self.parent = records.record(
+            "hypothesis", {"statement": "s", "vuln_class": "sqli", "status": "needs_proof",
+                           "confidence": 0.6, "evidence": [self.flow["id"]]}, "agent:hypothesize")
+        store.append([self.flow, self.body, self.stub, self.parent], self.log)
+
+    def run_admit(self, obj, extra=()):
+        return subprocess.run(
+            [sys.executable, "-m", "source_analyst.lifecycle.admit", "--type", "trace",
+             "--class", "sqli", "--lang", "java", "--src", "agent:trace", *extra],
+            cwd=ROOT, env=self.env, input=json.dumps(obj), capture_output=True, text=True)
+
+    def rev(self, **kw):
+        base = {"parent": self.parent["id"], "statement": "revised", "vuln_class": "sqli",
+                "status": "needs_proof", "confidence": 0.8,
+                "evidence": [self.flow["id"], self.body["id"]],
+                "basis": "the body escapes nothing relevant", "read": ["p.Helper.escape:S(S)"]}
+        base.update(kw)
+        return base
+
+    def records_of(self, kind):
+        return [r for r in store.read(self.log) if r.get("type") == kind]
+
+    def test_a_revision_becomes_a_child_at_the_next_depth(self):
+        r = self.run_admit(self.rev())
+        self.assertEqual(r.returncode, 0, r.stderr)
+        kids = [h for h in self.records_of("hypothesis") if h.get("parent")]
+        self.assertEqual(len(kids), 1)
+        self.assertEqual(kids[0]["depth"], 1)
+        self.assertEqual(kids[0]["parent"], self.parent["id"])
+        self.assertEqual(kids[0]["src"], "agent:trace")
+
+    def test_depth_counts_from_the_parent_not_from_zero(self):
+        deep = records.record("hypothesis",
+                              {"statement": "s", "vuln_class": "sqli", "status": "needs_proof",
+                               "confidence": 0.6, "evidence": [self.flow["id"]], "depth": 2},
+                              "agent:trace")
+        store.append([deep], self.log)
+        r = self.run_admit(self.rev(parent=deep["id"]))
+        self.assertEqual(r.returncode, 0, r.stderr)
+        kid = [h for h in self.records_of("hypothesis") if h.get("parent") == deep["id"]][0]
+        self.assertEqual(kid["depth"], 3)
+
+    def test_an_unknown_parent_is_rejected(self):
+        r = self.run_admit(self.rev(parent="h_nope"))
+        self.assertNotEqual(r.returncode, 0)
+        self.assertIn("parent", r.stderr)
+
+    def test_a_parent_that_is_not_a_hypothesis_is_rejected(self):
+        r = self.run_admit(self.rev(parent=self.flow["id"]))
+        self.assertNotEqual(r.returncode, 0)
+        self.assertIn("not a hypothesis", r.stderr)
+
+    def test_a_verdict_becomes_a_belief(self):
+        r = self.run_admit(self.rev(verdicts=[
+            {"subject": "p.Helper.escape:S(S)", "verdict": "unsound",
+             "rationale": "it replaces x with y, which the narrative's attack does not use"}]))
+        self.assertEqual(r.returncode, 0, r.stderr)
+        beliefs = self.records_of("belief")
+        self.assertEqual(len(beliefs), 1)
+        self.assertEqual(beliefs[0]["subject"], "p.Helper.escape:S(S)")
+        self.assertEqual(beliefs[0]["predicate"], "sanitizes")
+        self.assertEqual(beliefs[0]["object"], "sqli")
+        self.assertEqual(beliefs[0]["verdict"], "unsound")
+        self.assertEqual(beliefs[0]["audited_by"], "agent:trace")
+
+    def test_a_verdict_about_a_method_that_was_not_read_is_rejected(self):
+        """The failure this whole leg was built to end: a trust decision about code
+        nobody looked at. It would be believed by every later run."""
+        r = self.run_admit(self.rev(verdicts=[
+            {"subject": "p.Other.unseen:S(S)", "verdict": "sound", "rationale": "looks fine"}]))
+        self.assertNotEqual(r.returncode, 0)
+        self.assertIn("nobody read", r.stderr)
+
+    def test_a_verdict_on_an_unread_body_is_rejected_even_though_the_stub_exists(self):
+        """`external_stub` means the signature was known and the body was not. Reading
+        that as grounds for a verdict is the gap-as-acquittal the prompt warns about,
+        and it is the subtler half of the same bug."""
+        r = self.run_admit(self.rev(
+            evidence=[self.flow["id"], self.stub["id"]],
+            verdicts=[{"subject": "java.sql.Statement.executeQuery:R(S)", "verdict": "sound",
+                       "rationale": "the JDBC driver handles it"}]))
+        self.assertNotEqual(r.returncode, 0)
+        self.assertIn("not a trust decision", r.stderr)
+
+    def test_an_unknown_verdict_is_rejected(self):
+        r = self.run_admit(self.rev(verdicts=[
+            {"subject": "p.Helper.escape:S(S)", "verdict": "probably_fine", "rationale": "r"}]))
+        self.assertNotEqual(r.returncode, 0)
+        self.assertIn("unknown verdict", r.stderr)
+
+    def test_a_verdict_without_a_rationale_is_rejected(self):
+        """A verdict with no stated reason cannot be audited later, and this record is
+        precisely what stops the system re-litigating a sanitizer on every run."""
+        r = self.run_admit(self.rev(verdicts=[
+            {"subject": "p.Helper.escape:S(S)", "verdict": "sound", "rationale": ""}]))
+        self.assertNotEqual(r.returncode, 0)
+        self.assertIn("rationale", r.stderr)
+
+    def test_two_verdicts_on_one_subject_are_rejected(self):
+        v = {"subject": "p.Helper.escape:S(S)", "verdict": "sound", "rationale": "r"}
+        r = self.run_admit(self.rev(verdicts=[v, dict(v, verdict="unsound")]))
+        self.assertNotEqual(r.returncode, 0)
+        self.assertIn("two verdicts", r.stderr)
+
+    def test_hallucinated_evidence_is_still_rejected(self):
+        r = self.run_admit(self.rev(evidence=["f_" + "0" * 24]))
+        self.assertNotEqual(r.returncode, 0)
+
+    def test_confirmed_is_still_impossible(self):
+        r = self.run_admit(self.rev(status="confirmed"))
+        self.assertNotEqual(r.returncode, 0)
+        self.assertIn("dynamic", r.stderr)
+
+    def test_a_rejected_revision_writes_nothing_at_all(self):
+        """Whole or nothing: a revision that half-landed would leave a child with no
+        belief, or a belief with no child, and the tree would lie about its own depth."""
+        before = len(list(store.read(self.log)))
+        self.run_admit(self.rev(verdicts=[
+            {"subject": "p.Other.unseen:S(S)", "verdict": "sound", "rationale": "r"}]))
+        self.assertEqual(len(list(store.read(self.log))), before)
+
+
+if __name__ == "__main__":
+    unittest.main()

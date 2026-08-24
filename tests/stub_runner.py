@@ -2,8 +2,9 @@
 """A model that isn't one — the deterministic double behind the `run_agent` seam.
 
 Reads prompt+briefing on stdin exactly as a real runner does and emits the
-dullest defensible output: one hypothesis per case, one finding per hypothesis,
-citing evidence copied verbatim from the briefing. It judges nothing.
+dullest defensible output: one hypothesis per case, one unchanged revision per
+trace case, one finding per hypothesis — evidence copied verbatim from the
+briefing. It judges nothing.
 
 Two jobs:
   1. the whole brief -> run_agent -> admit -> render chain is testable with zero
@@ -50,6 +51,28 @@ def main() -> int:
                 "reasoning": "Stub runner: reported verbatim from the case evidence, "
                              "with no judgement applied.",
                 "seed": "",
+            })
+    elif agent == "trace":
+        for case in [r for r in rows if r.get("kind") == "trace_case"]:
+            h = case["hypothesis"]
+            evidence = [e["id"] for e in case.get("evidence", []) if e.get("id")]
+            evidence += [c["id"] for c in case.get("callees", []) if c.get("id")]
+            out.append({
+                "parent": h["id"],
+                "statement": h["statement"],
+                "vuln_class": vuln_class,
+                "status": h["status"],
+                # Unchanged, deliberately. The stub reads nothing, so it has no
+                # reason to move the number — and with a `rising_confidence` spend
+                # gate that means the null baseline cannot buy itself another level.
+                # A floor that could descend for free would not be a floor.
+                "confidence": h["confidence"],
+                "evidence": sorted(set(evidence)) or ["f_missing"],
+                "basis": "Stub runner: the bodies were fetched and not read.",
+                "read": [],
+                # No verdicts: judging nothing means recording no trust decision.
+                # A belief is what a later run will not redo, so an empty one here
+                # is the honest output, not a missing feature.
             })
     else:
         for row in [r for r in rows if r.get("kind") == "hypothesis"]:

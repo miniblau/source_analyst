@@ -211,6 +211,24 @@ class TestFailureModes(unittest.TestCase):
         self.assertEqual(r.returncode, 0, r.stderr)
         self.assertEqual(json.loads(r.stderr.strip().splitlines()[-1])["cases"], 2)
 
+    def test_the_count_comes_from_the_header_not_the_row_kind(self):
+        """The report leg briefs rows of kind `hypothesis`, not `case`. A gate that
+        only knew about `case` counted 0 there and never fired — the check would have
+        been dead on exactly the leg that writes the deliverable."""
+        rec = json.dumps({"hypothesis": "h_x", "tier": "static_pattern", "severity": "low",
+                          "recreation": "r", "refs": ["A.java:1"], "title": "t",
+                          "caveats": "c"}, separators=(",", ":"))
+        header = json.dumps({"kind": "briefing", "agent": "report",
+                             "chunk": {"index": 0, "of": 1, "rows": 3, "rows_total": 3}},
+                            separators=(",", ":"))
+        rows = "\n".join(json.dumps({"kind": "hypothesis", "hypothesis": {"id": "h_x"}},
+                                     separators=(",", ":")) for _ in range(3))
+        with tempfile.TemporaryDirectory() as d:
+            env = self._cfg(Path(d), {"t": {"cmd": ["echo", rec]}})
+            r = run(["--agent", "report"], header + "\n" + rows, env)
+        self.assertEqual(r.returncode, 4)
+        self.assertIn("3 case(s) briefed but only 1", r.stderr)
+
     def test_a_briefing_with_no_cases_is_not_short(self):
         """`cases: 0` must not turn every run into a short count — the check is
         about cases that went unjudged, not about briefings that carry none."""

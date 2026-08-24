@@ -1,0 +1,34 @@
+# Depth control for the branching loop (design §4.2). Data, like every other
+# vocabulary here — changing how far a review digs is a config edit, not a patch.
+#
+# Only `trace` loops. Everything else in the system is single-shot, which is what
+# keeps iteration in one auditable place.
+#
+# The two gates do different jobs and neither substitutes for the other:
+#
+#   max              a hard stop. Without it a chain of "and what does THAT call"
+#                    has no end, and a review that never terminates is not a
+#                    review. Depth 0 is the flat hypothesize pass.
+#
+#   spend_gate       a starvation rule. `rising_confidence` descends only where
+#                    the last round made the case STRONGER — a level costs budget,
+#                    so paying for one that weakened the case is how a rabbit hole
+#                    eats an afternoon. `always` disables it (useful when you want
+#                    a uniform sweep and are paying attention to the cost yourself).
+#
+# checkpoint_every is read by the driver, not by `brief`: at these depths a human
+# is asked "I'm this deep, continue?" (§4.2). NOT YET IMPLEMENTED — the value is
+# recorded so the config shape is stable, and `trace --checkpoint` is Phase 2's
+# next increment. A depth run today is bounded by `max` alone.
+
+depth:
+  max: 3
+  checkpoint_every: 2
+  spend_gate: rising_confidence   # rising_confidence | always
+
+budget:
+  # Advisory today: the driver loops per depth level, not per hypothesis. Recorded
+  # so a future scheduler has the numbers it was designed against rather than
+  # inventing new ones.
+  llm_calls_per_hypothesis: 6
+  cpg_queries_per_trace: 20
