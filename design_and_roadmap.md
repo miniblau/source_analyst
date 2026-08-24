@@ -757,6 +757,12 @@ Verification tier 3 against a defined target: harness generation, PoC execution,
   agent can't wander). Raw-Joern escape hatch deferred to a later phase.
 - Confidence model: single scalar, or separate reachability-confidence vs
   exploitability-confidence? (The latter maps better to your manual triage.)
+- Fan-out vs revision in the hypothesis tree. §4.1 allows a node to spawn several
+  children from new facts, but v1 `trace` revises one case into exactly one child and
+  `admit` refuses a second — because `store.revised_hypotheses` treats "is named as a
+  parent" as "is history", and a fork would make every report and scorecard show the
+  site twice with neither copy marked as the other's sibling. Enabling fan-out means
+  deciding first what a leaf *is* when a node has three of them.
 - Calibration signal selection — **deferred by decision (2026-08-24).**
   `config/calibration.yaml` is data and `score` already reports rho per signal, so a
   sweep costs no code. But WebGoat is a teaching corpus: one class, one language, sinks
