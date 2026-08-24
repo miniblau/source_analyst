@@ -140,6 +140,19 @@ def check_trace(obj: dict, log_recs: dict[str, dict], dynamic: bool,
         rec = log_recs.get(fid, {})
         if rec.get("kind") == "callee_body":
             read[rec.get("full_name", "")] = rec
+    # A method full name is `pkg.Class.method:ReturnType(ArgTypes)`. Models name the
+    # part before the colon — observed live, a verdict on
+    # `...SqlInjectionLesson6a.unionQueryChecker` against a fact whose full_name ends
+    # `:boolean(java.lang.String)`. That is the same formatting-versus-comprehension
+    # split as the class title, and the same answer: accept the shorter form when it
+    # picks out exactly one method that was read, and normalise it. When two overloads
+    # were read the short form is genuinely ambiguous, so it stays refused — the
+    # signature is the only thing that tells them apart.
+    by_qualified: dict[str, list[str]] = {}
+    for full in read:
+        by_qualified.setdefault(full.split(":")[0], []).append(full)
+    aliases = {q: names[0] for q, names in by_qualified.items()
+               if len(names) == 1 and q not in read}
 
     vocab = verdict_vocab()
     seen = set()
@@ -152,22 +165,32 @@ def check_trace(obj: dict, log_recs: dict[str, dict], dynamic: bool,
         if v["verdict"] not in vocab:
             raise AdmitError(
                 f"unknown verdict {v['verdict']!r}; expected one of {', '.join(sorted(vocab))}")
-        if v["subject"] not in read:
+        subject = aliases.get(v["subject"], v["subject"])
+        if subject not in read:
+            ambiguous = by_qualified.get(v["subject"], [])
+            if len(ambiguous) > 1:
+                raise AdmitError(
+                    f"verdict names subject {v['subject']!r}, which matches "
+                    f"{len(ambiguous)} overloads that were read — give the full name "
+                    f"including the signature, since that is all that separates them")
             raise AdmitError(
                 f"verdict names subject {v['subject']!r}, but no callee_body fact for it "
                 f"is cited in this revision's evidence — a trust decision about a method "
                 f"nobody read is a hallucination, and it would be believed by every "
                 f"later run")
-        if read[v["subject"]].get("status") != "resolved":
+        # Normalised in place: the belief store keys on the subject string, so a short
+        # form surviving into the log would never match the fact it was argued from.
+        v["subject"] = subject
+        if read[subject].get("status") != "resolved":
             # The signature was known and the body was not. Recording a verdict off
             # that is exactly the gap-as-acquittal the prompt warns about.
             raise AdmitError(
-                f"verdict names subject {v['subject']!r}, whose body was not read "
-                f"(callee_body status {read[v['subject']].get('status')!r}) — a gap in "
+                f"verdict names subject {subject!r}, whose body was not read "
+                f"(callee_body status {read[subject].get('status')!r}) — a gap in "
                 f"coverage is not a trust decision")
-        if v["subject"] in seen:
-            raise AdmitError(f"two verdicts for the same subject {v['subject']!r}")
-        seen.add(v["subject"])
+        if subject in seen:
+            raise AdmitError(f"two verdicts for the same subject {subject!r}")
+        seen.add(subject)
 
 
 def expand_trace(obj: dict, log_recs: dict[str, dict], vuln_class: str,

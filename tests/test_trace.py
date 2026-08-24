@@ -240,6 +240,34 @@ class TestAdmitTrace(unittest.TestCase):
         self.assertEqual(beliefs[0]["verdict"], "unsound")
         self.assertEqual(beliefs[0]["audited_by"], "agent:trace")
 
+    def test_a_verdict_may_name_the_method_without_its_signature(self):
+        """Observed live: a verdict on `...SqlInjectionLesson6a.unionQueryChecker`
+        against a fact whose full_name ends `:boolean(java.lang.String)`. The model
+        read the right method and named it the short way — formatting, not
+        comprehension, and the same answer as the class title."""
+        r = self.run_admit(self.rev(verdicts=[
+            {"subject": "p.Helper.escape", "verdict": "unsound",
+             "rationale": "it only replaces x with y"}]))
+        self.assertEqual(r.returncode, 0, r.stderr)
+        beliefs = self.records_of("belief")
+        # Normalised: the store keys on the subject, so a short form surviving into
+        # the log would never match the fact it was argued from.
+        self.assertEqual(beliefs[0]["subject"], "p.Helper.escape:S(S)")
+
+    def test_an_ambiguous_short_name_is_refused(self):
+        """Two overloads read: the signature is the only thing separating them, so
+        the short form genuinely does not pick one."""
+        other = records.fact(
+            {"kind": "callee_body", "full_name": "p.Helper.escape:S(S,int)",
+             "status": "resolved", "name": "escape", "body": "..."}, "cpg:callee_body")
+        store.append([other], self.log)
+        r = self.run_admit(self.rev(
+            evidence=[self.flow["id"], self.body["id"], other["id"]],
+            verdicts=[{"subject": "p.Helper.escape", "verdict": "unsound",
+                       "rationale": "r"}]))
+        self.assertNotEqual(r.returncode, 0)
+        self.assertIn("2 overloads", r.stderr)
+
     def test_a_verdict_about_a_method_that_was_not_read_is_rejected(self):
         """The failure this whole leg was built to end: a trust decision about code
         nobody looked at. It would be believed by every later run."""

@@ -70,8 +70,10 @@ One JSON object per `trace_case`, in the order given, nothing else on stdout:
 - `status` — `needs_proof`, `refuted` or `inconclusive`. `confirmed` is impossible in
   a static run and will be rejected.
 - `confidence` — 0..1, for the case *as it now stands*.
-- `verdicts` — zero or more trust decisions, each keyed on a method you read. Use only
-  the verdict names in the briefing's `verdicts` map. Omit the list entirely rather
+- `verdicts` — zero or more trust decisions, each keyed on a method you read. Copy its
+  `full_name` from the callee entry, signature and all; the shorter form is accepted
+  only when it picks out exactly one method you were shown. Use only the verdict names
+  in the briefing's `verdicts` map. Omit the list entirely rather
   than guessing; a verdict is a decision the next run will not redo, so a careless one
   is worse than none.
 
