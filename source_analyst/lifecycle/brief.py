@@ -442,8 +442,14 @@ def main(argv: list[str] | None = None) -> int:
         by_id = {r["id"]: r for r in log}
         rows = []
         for hid, h in sorted(wanted.items()):
+            # Slimmed the same way trace's rows are. This leg never had it, and once
+            # `trace` puts callee bodies into a hypothesis's evidence the report
+            # briefing inherits them: 14.2k tokens for four cases, against 4k before
+            # branching existed. A pass that has run fine for weeks can be pushed over
+            # a context limit by a change two legs upstream.
             rows.append({"kind": "hypothesis", "hypothesis": h,
-                         "evidence": [by_id[e] for e in h.get("evidence", []) if e in by_id]})
+                         "evidence": [_slim_callee(_slim_evidence(by_id[e]))
+                                      for e in h.get("evidence", []) if e in by_id]})
         if args.limit:
             rows = rows[:args.limit]
         header["status_filter"] = args.status
