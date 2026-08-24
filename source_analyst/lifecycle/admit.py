@@ -96,6 +96,22 @@ def check_trace(obj: dict, log_recs: dict[str, dict], dynamic: bool,
         raise AdmitError(
             f"trace revision names parent {obj['parent']!r}, which is not a hypothesis "
             f"in the log — a revision with no ancestor is a new hypothesis, not a child")
+    if any(r.get("type") == "hypothesis" and r.get("parent") == obj["parent"]
+           for r in log_recs.values()):
+        # v1 `trace` revises one case into one child, so a chain has one leaf and
+        # `store.revised_hypotheses` can treat "is a parent" as "is history". A second
+        # child would make that projection wrong in a way nothing would report: the
+        # site would appear twice in every report and scorecard, and neither copy
+        # would be marked as the other's sibling.
+        #
+        # §4.1 does allow a node to spawn several children from new facts. When that
+        # arrives it is a deliberate change to the leaf projection, not something to
+        # discover from a doubled report — which is why this refuses rather than
+        # quietly allowing it.
+        raise AdmitError(
+            f"hypothesis {obj['parent']!r} already has a revision; a second child would "
+            f"fork the chain, and the leaf projection every report and scorecard reads "
+            f"cannot express a fork")
 
     # What the agent was actually shown: the callee bodies among its own cited facts.
     # A verdict about anything else is a judgement of code that was never read, which
@@ -278,7 +294,12 @@ def main(argv: list[str] | None = None) -> int:
                     args.type, dict(obj, vuln_class=args.vuln_class), src=args.src))
             elif args.type == "trace":
                 check_trace(obj, log_recs, args.dynamic, args.vuln_class, klass.title)
-                built.extend(expand_trace(obj, log_recs, args.vuln_class, args.src))
+                new = expand_trace(obj, log_recs, args.vuln_class, args.src)
+                # The snapshot predates this batch, so two revisions of one parent in
+                # a single call would both pass the fork check above. Fold each child
+                # in as it is built and the second one sees the first.
+                log_recs.update({r["id"]: r for r in new})
+                built.extend(new)
             else:
                 check_finding(obj, log_ids, ceiling)
                 built.append(records.record(args.type, obj, src=args.src))

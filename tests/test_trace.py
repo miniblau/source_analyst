@@ -279,6 +279,28 @@ class TestAdmitTrace(unittest.TestCase):
         self.assertNotEqual(r.returncode, 0)
         self.assertIn("two verdicts", r.stderr)
 
+    def test_a_second_revision_of_one_parent_is_refused(self):
+        """v1 revises one case into one child, so `revised_hypotheses` can treat
+        "is a parent" as "is history". A fork makes that projection wrong in a way
+        nothing reports: the site appears twice in every report and scorecard and
+        neither copy is marked as the other's sibling."""
+        self.assertEqual(self.run_admit(self.rev()).returncode, 0)
+        r = self.run_admit(self.rev(statement="a different revision"))
+        self.assertNotEqual(r.returncode, 0)
+        self.assertIn("already has a revision", r.stderr)
+
+    def test_two_revisions_of_one_parent_in_one_batch_are_refused(self):
+        """The log snapshot predates the batch, so both would pass a check made
+        against it alone."""
+        r = subprocess.run(
+            [sys.executable, "-m", "source_analyst.lifecycle.admit", "--type", "trace",
+             "--class", "sqli", "--lang", "java", "--src", "agent:trace"],
+            cwd=ROOT, env=self.env, capture_output=True, text=True,
+            input=json.dumps(self.rev()) + "\n" + json.dumps(self.rev(statement="b")))
+        self.assertNotEqual(r.returncode, 0)
+        self.assertIn("already has a revision", r.stderr)
+        self.assertEqual([h for h in self.records_of("hypothesis") if h.get("parent")], [])
+
     def test_hallucinated_evidence_is_still_rejected(self):
         r = self.run_admit(self.rev(evidence=["f_" + "0" * 24]))
         self.assertNotEqual(r.returncode, 0)
