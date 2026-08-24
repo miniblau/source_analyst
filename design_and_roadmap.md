@@ -124,6 +124,31 @@ unreported. The note appears only where candidates exist — boilerplate on ever
 trains the reader to skip it. General rule: **if a caveat is derivable from the facts,
 the renderer owes it; only case-specific judgement belongs to the agent.**
 
+**Refutations must not rest on names — 2026-08-24.** The three ProfileUpload exclusions
+were correct (`ProfileUploadBase.execute` is pure file I/O; no JDBC anywhere in the
+package) but the agent reached that by arguing from the *package name*, having never been
+shown the callee's body. Structurally the log could not tell "refuted because the code
+does no SQL" from "refuted because the package is called pathtraversal" — and the second
+is a guess about code nobody looked at. Two fixes:
+
+* `reachable` now emits **`sink_arg_type`** and `sink_arg_type_resolved`. Sinks match on a
+  short name, so the tainted argument's static type is what settles "is this the right
+  kind of call at all" without appealing to naming. On WebGoat it separates cleanly: 23
+  `java.lang.String` against 3 `MultipartFile`, and the three are exactly the known false
+  positives. An unresolved type is explicitly *not* evidence — `ANY` from a frontend gap
+  must never refute a live case.
+* `render` states each refutation's **basis**: a resolved argument type, or "call site
+  only — the callee's implementation was never examined… treat this exclusion as
+  unverified". Derivable from the facts, so the renderer owes it.
+
+`agents/hypothesize.md` now ranks the evidence — type, then code, then resolved callee —
+and says plainly that a file or package name is not an argument, and that a refutation
+which cannot be supported from the evidence is `inconclusive`, not `refuted`.
+
+Reading a *called method's body* remains impossible for any agent: that needs a new query
+and the `trace` loop, and is deliberately Phase 2. Until then nothing in the system can
+find a sink inside a method the briefing did not quote.
+
 **Known limit, load-bearing.** `reachableByFlows` enumerates *representative* paths, not
 all routes (proven on WebGoat Lesson8: the clean 61→62 route is never returned). No tool
 may therefore claim a flow is sanitized, and none does — `sanitizer_on_path` reports

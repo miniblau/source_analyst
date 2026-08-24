@@ -46,8 +46,23 @@ One JSON object per line on stdout, nothing else:
 
 **Refute when the sink is not what the pattern hoped for.** Sink matching is by
 short method name, so a name can match a method that has nothing to do with the
-class. `full_name` and `code` are how you tell. A refuted case is a *useful*
-output — it is what stops the list drowning in noise.
+class. A refuted case is a *useful* output — it is what stops the list drowning in
+noise.
+
+Argue from what the evidence *shows*, in this order:
+
+1. `arg_type` — the static type of the tainted value. A type that cannot hold the
+   kind of data the narrative describes settles the case, and settles it without
+   appealing to any name. Check `arg_type_resolved` first: an unresolved type is a
+   frontend gap and proves nothing in either direction.
+2. `code` and `arg_code` — what is actually written at the call site.
+3. `full_name` — the resolved callee.
+
+**A name is the weakest argument available, and a file or package name is not an
+argument at all.** You are not shown the body of the method being called, so
+"this package is about something else" is a guess about code you have not seen.
+Say so when that is all you have: a refutation you cannot support from the
+evidence is `inconclusive`, not `refuted`.
 
 **A sanitizer candidate is not a defence.** Its presence is a fact; its
 effectiveness is not, and is not yours to assert. Reduce confidence, state what

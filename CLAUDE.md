@@ -165,6 +165,10 @@ The substrate spine. Get this right and most of the system follows.
   site the *substrate* never offered (a substrate gap, not a model miss), and a hypothesis
   about an *unlabelled* site (unscored, not correct). Grade on evidence facts, never on
   the `case` string the agent wrote about itself.
+- **A name is the weakest argument, and a file or package name is not one.** Sinks match
+  on short names, so refuting on `full_name`'s package is a guess about code nobody
+  looked at. Argue from the tainted argument's resolved type, then the call-site code.
+  An unresolved type (`ANY`) is not evidence in either direction.
 - **If a caveat is derivable from the facts, the renderer owes it.** Only case-specific
   judgement belongs to the agent. Asking the model to restate the representative-paths
   limit produced 0 mentions across 23 findings; `render` now emits it deterministically.

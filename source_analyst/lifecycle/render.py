@@ -191,8 +191,28 @@ def main(argv: list[str] | None = None) -> int:
             conf = h.get("confidence")
             w(f"- `{site_of(h, by_id)}` \u2014 **confidence "
               f"{conf if conf is not None else '?'}** \u2014 "
-              f"{h.get('reasoning', '(no reasoning recorded)')}\n"
-              f"  <sub>Evidence: {', '.join(h.get('evidence', []))} \u00b7 {h.get('id','?')}"
+              f"{h.get('reasoning', '(no reasoning recorded)')}\n")
+            # Derivable from the facts, so the renderer owes it. The agent is never
+            # shown the body of the method being called, so a refutation can rest on
+            # a resolved argument type (sound) or on what things are named (a guess
+            # about code nobody looked at). Those read identically in prose; they are
+            # not the same claim, and the weaker one is where a real bug hides.
+            arg_type, resolved = "", False
+            for fid in h.get("evidence", []):
+                f0 = by_id.get(fid, {})
+                if f0.get("sink_arg_type"):
+                    arg_type = f0["sink_arg_type"]
+                    resolved = bool(f0.get("sink_arg_type_resolved"))
+                    break
+            if arg_type and resolved:
+                w(f"  **Basis:** the tainted argument is `{arg_type}` \u2014 a resolved "
+                  f"type, so this exclusion does not rest on naming.\n")
+            else:
+                w("  **Basis:** call site only \u2014 the callee's implementation was "
+                  "never examined and its argument type is "
+                  + (f"`{arg_type}`, unresolved" if arg_type else "unknown")
+                  + ". Treat this exclusion as unverified.\n")
+            w(f"  <sub>Evidence: {', '.join(h.get('evidence', []))} \u00b7 {h.get('id','?')}"
               f" via {h.get('src','?')}</sub>\n")
         w("\n")
 

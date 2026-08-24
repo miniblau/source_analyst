@@ -76,6 +76,12 @@ def _cases(log: list[dict]) -> list[dict]:
             "sink": {
                 "name": flow.get("sink_name"), "full_name": flow.get("sink_full_name"),
                 "code": flow.get("sink_code"), "arg_code": flow.get("sink_arg_code"),
+                # The static type of the tainted argument, and whether the frontend
+                # actually resolved it. Sinks are matched on a short name, so this is
+                # the one piece of evidence that settles "is this even the right kind
+                # of call" without appealing to what anything is named.
+                "arg_type": flow.get("sink_arg_type"),
+                "arg_type_resolved": flow.get("sink_arg_type_resolved"),
                 "file": flow.get("sink_file"), "line": flow.get("sink_line"),
                 "method": flow.get("object"),
                 # From the sink inventory, when present: is the statement text a

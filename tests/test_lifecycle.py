@@ -184,6 +184,15 @@ class TestBrief(unittest.TestCase):
         # The representative-paths caveat travels with the case, not just the docs.
         self.assertIn("representative", case["sanitizers"]["caveat"])
 
+    def test_case_carries_the_tainted_arguments_type(self):
+        """Sinks match on a short name, so the argument's type is what settles
+        'is this even the right kind of call' without appealing to naming."""
+        store.append([flow_fact(sink_arg_type="java.lang.String",
+                                sink_arg_type_resolved=True)], self.log)
+        case = [r for r in self.brief("--agent", "hypothesize") if r.get("kind") == "case"][0]
+        self.assertEqual(case["sink"]["arg_type"], "java.lang.String")
+        self.assertTrue(case["sink"]["arg_type_resolved"])
+
     def test_empty_log_still_briefs_without_inventing_cases(self):
         rows = self.brief("--agent", "hypothesize")
         self.assertEqual(rows[0]["cases"], 0)
@@ -471,6 +480,56 @@ class TestRenderHonesty(unittest.TestCase):
         """Boilerplate on every finding would train the reader to skip it."""
         self.seed([])
         self.assertNotIn("Sanitizer note", self.render())
+
+
+class TestRefutationBasis(unittest.TestCase):
+    """A refutation resting on a resolved argument type and one resting on what
+    things are named read identically in prose. They are not the same claim, and
+    the weaker one is where a real bug hides, so the renderer separates them."""
+
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(self.tmp.cleanup)
+        self.log = Path(self.tmp.name) / "log.jsonl"
+        self.env = dict(os.environ, SOURCE_ANALYST_LOG=str(self.log))
+
+    def seed(self, **fact_kw):
+        f = flow_fact(**fact_kw)
+        h = records.record("hypothesis", {
+            "statement": "s", "vuln_class": "sqli", "status": "refuted",
+            "confidence": 0.9, "evidence": [f["id"]],
+            "reasoning": "the package is about something else"}, src="agent:test")
+        store.append([f, h], self.log)
+
+    def render(self):
+        r = subprocess.run(
+            [sys.executable, "-m", "source_analyst.lifecycle.render", "--class", "sqli"],
+            cwd=ROOT, env=self.env, capture_output=True, text=True)
+        self.assertEqual(r.returncode, 0, r.stderr)
+        return r.stdout
+
+    def test_resolved_type_is_reported_as_a_sound_basis(self):
+        self.seed(sink_arg_type="org.springframework.web.multipart.MultipartFile",
+                  sink_arg_type_resolved=True)
+        out = self.render()
+        self.assertIn("MultipartFile", out)
+        self.assertIn("does not rest on naming", out)
+
+    def test_missing_type_is_flagged_as_unverified(self):
+        """The state every refutation was in before the type fact existed."""
+        self.seed()
+        out = self.render()
+        self.assertIn("call site only", out)
+        self.assertIn("argument type is unknown", out)
+        self.assertIn("unverified", out)
+
+    def test_unresolved_type_is_not_treated_as_evidence(self):
+        """A frontend that could not resolve a type has said nothing. Reading ANY
+        as 'not a string' would refute a live case on a tooling gap."""
+        self.seed(sink_arg_type="ANY", sink_arg_type_resolved=False)
+        out = self.render()
+        self.assertIn("unresolved", out)
+        self.assertIn("unverified", out)
 
 
 class TestPromptHygiene(unittest.TestCase):

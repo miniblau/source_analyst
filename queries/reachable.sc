@@ -46,6 +46,28 @@ def receiverType(c: nodes.Call): String = c.receiver.headOption match {
   case _                                => ""
 }
 
+// Static type of the value that lands in the sink argument. Reported because a
+// sink is matched on a SHORT NAME, so a name can match a method that has nothing
+// to do with the class — and the argument's type settles that without appealing
+// to what anything is called. Proven on WebGoat: the three ProfileUpload
+// `execute` collisions take a MultipartFile, which cannot be statement text,
+// while the package name that was used to dismiss them proves nothing at all.
+def typeOf(n: nodes.AstNode): String = n match {
+  case x: nodes.Identifier        => x.typeFullName
+  case x: nodes.Call              => x.typeFullName
+  case x: nodes.Literal           => x.typeFullName
+  case x: nodes.MethodParameterIn => x.typeFullName
+  case x: nodes.MethodRef         => x.typeFullName
+  case x: nodes.TypeRef           => x.typeFullName
+  case _                          => ""
+}
+
+// An unresolved type is NOT evidence of anything. `javasrc2cpg` yields ANY for a
+// value it could not resolve, and reading that as "not a string" would refute a
+// live case on a frontend gap. Callers must check this before arguing from type.
+def typeResolved(t: String): Boolean =
+  t.nonEmpty && t != "ANY" && !t.toLowerCase.contains("unresolved")
+
 // ------------------------------------------------------------------ endpoints
 
 val annotatedParams: List[nodes.CfgNode] =
@@ -138,6 +160,8 @@ val rows = grouped.toList.flatMap { case (_, entries) =>
     "sink_full_name"  -> inCallOf(sinkNode).map(_.methodFullName).getOrElse(""),
     "sink_code"       -> clip(inCallOf(sinkNode).map(_.code).getOrElse(sinkNode.code), 200),
     "sink_arg_code"   -> clip(sinkNode.code, 200),
+    "sink_arg_type"          -> typeOf(sinkNode),
+    "sink_arg_type_resolved" -> typeResolved(typeOf(sinkNode)),
     "sink_arg_index"  -> argIndex,
     // Anchor on the CALL, not the tainted argument. On a multi-line call the
     // two differ (WebGoat Servers.java: call at 50, argument at 51), and
