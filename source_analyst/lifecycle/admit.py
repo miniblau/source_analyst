@@ -165,6 +165,14 @@ def check_trace(obj: dict, log_recs: dict[str, dict], dynamic: bool,
         if v["verdict"] not in vocab:
             raise AdmitError(
                 f"unknown verdict {v['verdict']!r}; expected one of {', '.join(sorted(vocab))}")
+        if vocab[v["verdict"]].get("requires_dynamic") and not dynamic:
+            # Same guard as `confirmed` on a status, for the same reason. A static
+            # read can show a defence FAILS; it cannot show it holds against every
+            # input, and this is the only verdict that prunes.
+            raise AdmitError(
+                f"verdict {v['verdict']!r} requires a dynamic verification tier; this "
+                f"run is static-only. Reading a method can show a defence fails, not "
+                f"that it holds — use `unsound`, `partial` or `unknown`")
         subject = aliases.get(v["subject"], v["subject"])
         if subject not in read:
             ambiguous = by_qualified.get(v["subject"], [])

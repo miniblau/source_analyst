@@ -250,13 +250,16 @@ class TestSchemasMatchTheGate(unittest.TestCase):
         self.assertTrue(set(TRACE_FIELDS) <= required,
                         f"schema is missing {set(TRACE_FIELDS) - required}")
 
-    def test_trace_verdict_enum_is_the_config_vocabulary(self):
-        """A verdict the grammar can emit but the gate refuses is a batch thrown away
-        for a spelling; one the gate accepts but the grammar cannot emit is a trust
-        decision that can never be recorded. Both are silent."""
+    def test_trace_verdict_enum_is_the_vocabulary_minus_the_impossible(self):
+        """A verdict the grammar can emit but the gate refuses is a batch thrown away;
+        one the gate accepts but the grammar cannot emit is a trust decision that can
+        never be recorded. Both are silent, so they are kept in step mechanically —
+        and `sound` needs a dynamic tier, exactly as `confirmed` does for a status."""
         vocab = yaml.safe_load((ROOT / "config" / "verdicts.yaml").read_text())
+        allowed = {k for k, v in vocab.items() if not v.get("requires_dynamic")}
         offered = self.load("trace")["properties"]["verdicts"]["items"]["properties"]
-        self.assertEqual(set(offered["verdict"]["enum"]), set(vocab))
+        self.assertEqual(set(offered["verdict"]["enum"]), allowed)
+        self.assertNotIn("sound", allowed, "the only pruning verdict must not be static")
 
     def test_severity_enum_matches_admit(self):
         from source_analyst.lifecycle.admit import SEVERITIES

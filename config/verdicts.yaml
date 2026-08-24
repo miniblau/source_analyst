@@ -14,15 +14,31 @@
 sound:
   claim: audited and holds — paths through this subject may be pruned
   prunes: true
+  # The mirror image of `confirmed` (config/hypothesis.yaml), and refused for the
+  # same reason. This is the only verdict that PRUNES, so a wrong one removes a live
+  # vulnerability from every future run — the most expensive mistake in the system,
+  # and the one nothing downstream would ever question. A static read cannot show
+  # that a defence holds against every input; it can only show one that fails.
+  #
+  # Not hypothetical: a live trace filed `sound` on a method whose own rationale read
+  # "does not sanitize or escape the username value ... does not contain any logic
+  # that would prevent SQL injection". The prose was right and the verdict was not.
+  requires_dynamic: true
+
+# The three below are all non-pruning, which is why a static run may reach them: each
+# says "keep looking", and being wrong costs a second look rather than a missed bug.
 
 unsound:
+  requires_dynamic: false
   claim: audited and does NOT hold; a path through this subject still reaches
   prunes: false
 
 partial:
+  requires_dynamic: false
   claim: holds only under stated conditions — the rationale carries them
   prunes: false
 
 unknown:
+  requires_dynamic: false
   claim: audited inconclusively; recorded so the next run does not redo the work
   prunes: false

@@ -103,7 +103,13 @@ A number that drifts without a reason makes the whole ranking meaningless.
 runs on the path is a fact; whether it defeats the attack the narrative describes is a
 judgement, and it belongs in `verdicts` with a rationale that quotes the code —
 `unsound` when you can see it fails, `partial` when it holds only under conditions you
-can state, `unknown` when reading it settled nothing. Escaping that neutralises one
+can state, `unknown` when reading it settled nothing.
+
+There is deliberately **no verdict for "this defence works"** available to you. Reading
+a method can show that a defence fails; it cannot show that it holds against every
+input, and that verdict is the only one that would let a later run stop looking. If the
+code looks correct to you, that is `partial` with the conditions stated, or `unknown` —
+never a clean bill of health. Escaping that neutralises one
 context routinely fails in another, so name the context you checked.
 
 **Absence of a clean reported path still proves nothing.** The engine enumerates

@@ -127,7 +127,7 @@ class TestPriorBeliefsReachTrace(unittest.TestCase):
                             "cpg:callee_body")
         audited = records.belief("p.Helper.escape:S(S)", "sanitizes", "sqli", "unsound",
                                  "it only strips one quote form", "human")
-        unrelated = records.belief("p.Other.thing:S(S)", "sanitizes", "sqli", "sound",
+        unrelated = records.belief("p.Other.thing:S(S)", "sanitizes", "sqli", "partial",
                                    "not on this path at all", "human")
         store.append([flow, root, body, audited, unrelated], self.log)
 
@@ -272,7 +272,7 @@ class TestAdmitTrace(unittest.TestCase):
         """The failure this whole leg was built to end: a trust decision about code
         nobody looked at. It would be believed by every later run."""
         r = self.run_admit(self.rev(verdicts=[
-            {"subject": "p.Other.unseen:S(S)", "verdict": "sound", "rationale": "looks fine"}]))
+            {"subject": "p.Other.unseen:S(S)", "verdict": "unsound", "rationale": "looks bad"}]))
         self.assertNotEqual(r.returncode, 0)
         self.assertIn("nobody read", r.stderr)
 
@@ -282,10 +282,30 @@ class TestAdmitTrace(unittest.TestCase):
         and it is the subtler half of the same bug."""
         r = self.run_admit(self.rev(
             evidence=[self.flow["id"], self.stub["id"]],
-            verdicts=[{"subject": "java.sql.Statement.executeQuery:R(S)", "verdict": "sound",
+            verdicts=[{"subject": "java.sql.Statement.executeQuery:R(S)", "verdict": "unsound",
                        "rationale": "the JDBC driver handles it"}]))
         self.assertNotEqual(r.returncode, 0)
         self.assertIn("not a trust decision", r.stderr)
+
+    def test_the_pruning_verdict_needs_a_dynamic_tier(self):
+        """`sound` is the mirror of `confirmed` and the only verdict that PRUNES, so a
+        wrong one removes a live vulnerability from every future run. Observed live:
+        a trace filed `sound` on a method whose own rationale said it "does not
+        contain any logic that would prevent SQL injection"."""
+        r = self.run_admit(self.rev(verdicts=[
+            {"subject": "p.Helper.escape:S(S)", "verdict": "sound",
+             "rationale": "it escapes quotes"}]))
+        self.assertNotEqual(r.returncode, 0)
+        self.assertIn("requires a dynamic verification tier", r.stderr)
+        self.assertEqual(self.records_of("belief"), [])
+
+    def test_the_pruning_verdict_is_allowed_in_a_dynamic_run(self):
+        r = self.run_admit(self.rev(verdicts=[
+            {"subject": "p.Helper.escape:S(S)", "verdict": "sound",
+             "rationale": "a payload was driven through it and did not reach"}]),
+            extra=("--dynamic",))
+        self.assertEqual(r.returncode, 0, r.stderr)
+        self.assertEqual(self.records_of("belief")[0]["verdict"], "sound")
 
     def test_an_unknown_verdict_is_rejected(self):
         r = self.run_admit(self.rev(verdicts=[
@@ -297,13 +317,13 @@ class TestAdmitTrace(unittest.TestCase):
         """A verdict with no stated reason cannot be audited later, and this record is
         precisely what stops the system re-litigating a sanitizer on every run."""
         r = self.run_admit(self.rev(verdicts=[
-            {"subject": "p.Helper.escape:S(S)", "verdict": "sound", "rationale": ""}]))
+            {"subject": "p.Helper.escape:S(S)", "verdict": "unsound", "rationale": ""}]))
         self.assertNotEqual(r.returncode, 0)
         self.assertIn("rationale", r.stderr)
 
     def test_two_verdicts_on_one_subject_are_rejected(self):
-        v = {"subject": "p.Helper.escape:S(S)", "verdict": "sound", "rationale": "r"}
-        r = self.run_admit(self.rev(verdicts=[v, dict(v, verdict="unsound")]))
+        v = {"subject": "p.Helper.escape:S(S)", "verdict": "unsound", "rationale": "r"}
+        r = self.run_admit(self.rev(verdicts=[v, dict(v, verdict="partial")]))
         self.assertNotEqual(r.returncode, 0)
         self.assertIn("two verdicts", r.stderr)
 
@@ -361,7 +381,7 @@ class TestAdmitTrace(unittest.TestCase):
         belief, or a belief with no child, and the tree would lie about its own depth."""
         before = len(list(store.read(self.log)))
         self.run_admit(self.rev(verdicts=[
-            {"subject": "p.Other.unseen:S(S)", "verdict": "sound", "rationale": "r"}]))
+            {"subject": "p.Other.unseen:S(S)", "verdict": "unsound", "rationale": "r"}]))
         self.assertEqual(len(list(store.read(self.log))), before)
 
 
