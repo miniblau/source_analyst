@@ -448,6 +448,29 @@ class TestRenderSummary(unittest.TestCase):
         section = self.render().split("## Refuted during triage")[1]
         self.assertIn("Evidence: f_", section)
 
+    def test_refutation_on_a_sanitized_path_is_flagged_whatever_the_confidence(self):
+        """The one warning that does not correlate with confidence. A live traced run
+        refuted a real vulnerability at 0.95 whose own basis ended "the vulnerability
+        exists because the input is still concatenated regardless of the sanitizer's
+        outcome" — and weakest-first ordering sorts that to the bottom of the list."""
+        f = flow_fact(sink_line=20)
+        check = records.fact({"kind": "sanitizer_check", "sink_file": "A.java",
+                              "sink_line": 20, "candidate_count": 2,
+                              "candidate_sanitizers": [{"name": "matches"}]},
+                             "cpg:sanitizer_on_path")
+        h = records.record("hypothesis", {
+            "statement": "s", "vuln_class": "sqli", "status": "refuted",
+            "confidence": 0.95, "evidence": [f["id"], check["id"]],
+            "reasoning": "a sanitizer is present"}, src="agent:test")
+        store.append([f, check, h], self.log)
+        out = self.render()
+        self.assertIn("Check this one.", out)
+        self.assertIn("effectiveness is not", out)
+
+    def test_refutation_with_no_sanitizer_on_the_path_is_not_flagged(self):
+        self.build([(0.2, "low", "refuted")])
+        self.assertNotIn("Check this one.", self.render())
+
     def test_no_refuted_section_when_nothing_was_refuted(self):
         self.build([(0.9, "high", "needs_proof")])
         self.assertNotIn("Refuted during triage", self.render())
