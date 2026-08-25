@@ -237,5 +237,219 @@
         }
       }
     }
+  },
+  "java_path_traversal_flow": {
+    "path": "corpus/fixtures/java_path_traversal_flow",
+    "lang": "JAVASRC",
+    "note": "in-repo two-sided control for path_traversal: receiver-tainted File sink, a stripped variant, a literal-name control, and a source with no sink",
+    "rules": [
+      "java/path_traversal"
+    ],
+    "queries": {
+      "request_sources": {
+        "params": {
+          "annotations": [
+            "RequestParam",
+            "PathVariable",
+            "RequestBody",
+            "RequestHeader",
+            "CookieValue"
+          ],
+          "calls": [
+            "getParameter",
+            "getParameterValues",
+            "getHeader",
+            "getQueryString",
+            "getCookies",
+            "getInputStream",
+            "getReader"
+          ]
+        }
+      },
+      "reachable": {
+        "params": {
+          "annotations": [
+            "RequestParam",
+            "PathVariable",
+            "RequestBody",
+            "RequestHeader",
+            "CookieValue"
+          ],
+          "calls": [
+            "getParameter",
+            "getParameterValues",
+            "getHeader",
+            "getQueryString",
+            "getCookies",
+            "getInputStream",
+            "getReader"
+          ],
+          "sinks": [
+            "createNewFile",
+            "mkdir",
+            "mkdirs",
+            "delete",
+            "deleteOnExit",
+            "renameTo",
+            "listFiles",
+            "exists",
+            "isFile",
+            "isDirectory",
+            "canRead",
+            "canWrite",
+            "setReadable",
+            "setWritable",
+            "transferTo"
+          ],
+          "full_name_filter": [],
+          "arg_index": "0"
+        }
+      },
+      "sanitizer_on_path": {
+        "params": {
+          "annotations": [
+            "RequestParam",
+            "PathVariable",
+            "RequestBody",
+            "RequestHeader",
+            "CookieValue"
+          ],
+          "calls": [
+            "getParameter",
+            "getParameterValues",
+            "getHeader",
+            "getQueryString",
+            "getCookies",
+            "getInputStream",
+            "getReader"
+          ],
+          "sinks": [
+            "createNewFile",
+            "mkdir",
+            "mkdirs",
+            "delete",
+            "deleteOnExit",
+            "renameTo",
+            "listFiles",
+            "exists",
+            "isFile",
+            "isDirectory",
+            "canRead",
+            "canWrite",
+            "setReadable",
+            "setWritable",
+            "transferTo"
+          ],
+          "full_name_filter": [],
+          "arg_index": "0",
+          "sanitizers": [
+            "getCanonicalPath",
+            "getCanonicalFile",
+            "toRealPath",
+            "normalize",
+            "startsWith",
+            "getName",
+            "replace",
+            "replaceAll",
+            "matches",
+            "contains",
+            "substring",
+            "escape.*",
+            "encode.*",
+            "sanitize.*",
+            "validate.*"
+          ],
+          "sanitizer_full_name_filter": []
+        }
+      }
+    }
+  },
+  "java_open_redirect_flow": {
+    "path": "corpus/fixtures/java_open_redirect_flow",
+    "lang": "JAVASRC",
+    "note": "in-repo two-sided control for open_redirect: both sides flow to the same sink, and only the allowlist lookup separates them",
+    "rules": [
+      "java/open_redirect"
+    ],
+    "queries": {
+      "reachable": {
+        "params": {
+          "annotations": [
+            "RequestParam",
+            "PathVariable",
+            "RequestBody",
+            "RequestHeader",
+            "CookieValue"
+          ],
+          "calls": [
+            "getParameter",
+            "getParameterValues",
+            "getHeader",
+            "getQueryString",
+            "getCookies",
+            "getInputStream",
+            "getReader"
+          ],
+          "sinks": [
+            "<init>",
+            "sendRedirect",
+            "setHeader"
+          ],
+          "full_name_filter": [
+            ".*ModelAndView.*",
+            ".*RedirectView.*",
+            ".*sendRedirect.*",
+            ".*setHeader.*"
+          ],
+          "arg_index": "1"
+        }
+      },
+      "sanitizer_on_path": {
+        "params": {
+          "annotations": [
+            "RequestParam",
+            "PathVariable",
+            "RequestBody",
+            "RequestHeader",
+            "CookieValue"
+          ],
+          "calls": [
+            "getParameter",
+            "getParameterValues",
+            "getHeader",
+            "getQueryString",
+            "getCookies",
+            "getInputStream",
+            "getReader"
+          ],
+          "sinks": [
+            "<init>",
+            "sendRedirect",
+            "setHeader"
+          ],
+          "full_name_filter": [
+            ".*ModelAndView.*",
+            ".*RedirectView.*",
+            ".*sendRedirect.*",
+            ".*setHeader.*"
+          ],
+          "arg_index": "1",
+          "sanitizers": [
+            "startsWith",
+            "matches",
+            "contains",
+            "replace",
+            "replaceAll",
+            "getOrDefault",
+            "get",
+            "encode.*",
+            "validate.*",
+            "sanitize.*",
+            "isValid.*"
+          ],
+          "sanitizer_full_name_filter": []
+        }
+      }
+    }
   }
 }

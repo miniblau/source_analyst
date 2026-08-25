@@ -1,0 +1,86 @@
+# Open-redirect patterns for Java (design §10.1). Data, never code.
+#
+# THIS CLASS IS THE ONE THAT NEEDS `full_name_filter`, and it is worth saying why,
+# because sqli and path_traversal both leave it empty.
+#
+# Spring performs a redirect by CONSTRUCTING a view: `new ModelAndView("redirect:"
+# + url)`. Joern names every constructor call `<init>`, so the short name carries
+# no information at all — on WebGoat `<init>` matches 490 call sites. Portable-first
+# matching (§10.3) says match on `.name` and tighten only where the corpus proves it
+# noisy; 490-to-18 is that proof. The filter is what makes the sink nameable.
+#
+# Verified on WebGoat: the filter matches these sites even though `resolved` is
+# false for them (Spring's jars are absent), because the unresolved methodFullName
+# still carries the type name. A filter that had required resolution would have
+# dropped exactly the four sites this class exists to find.
+#
+# KNOWN CONSEQUENCE of the whitelist shape (sql_sinks.sc:40): the filter applies to
+# EVERY sink in the set, so `sendRedirect` needs its own entry below or it would be
+# filtered out by the ModelAndView patterns. Adding a sink here means adding a
+# filter line too — unlike the other two classes.
+
+class: open_redirect
+language: java
+
+sources:
+  # Unchanged from sqli and path_traversal. Three classes now share this block
+  # verbatim, which is the seam working: a request parameter is a request
+  # parameter regardless of what the sink does with it.
+  annotations:
+    - RequestParam
+    - PathVariable
+    - RequestBody
+    - RequestHeader
+    - CookieValue
+  calls:
+    - getParameter
+    - getParameterValues
+    - getHeader
+    - getQueryString
+    - getCookies
+    - getInputStream
+    - getReader
+
+sinks:
+  sinks:
+    - <init>
+    - sendRedirect
+    - setHeader
+  full_name_filter:
+    - ".*ModelAndView.*"
+    - ".*RedirectView.*"
+    - ".*sendRedirect.*"
+    - ".*setHeader.*"
+  arg_index: "1"
+
+sanitizers:
+  # CANDIDATES ONLY. The real defence for this class is choosing from a fixed set
+  # rather than sanitizing text, and that defence does not look like a sanitizer
+  # call at all — WebGoat's safe controller is a Map lookup. So an EMPTY candidate
+  # list here does not mean "unprotected", and a case with no sanitizer fact is not
+  # thereby vulnerable. The source's TYPE is the faster discriminator for this
+  # class; see the third seed hypothesis.
+  sanitizers:
+    - startsWith
+    - matches
+    - contains
+    - replace
+    - replaceAll
+    - getOrDefault
+    - get
+    - encode.*
+    - validate.*
+    - sanitize.*
+    - isValid.*
+  sanitizer_full_name_filter: []
+
+queries:
+  sql_sinks:         [sinks]
+  request_sources:   [sources]
+  reachable:         [sources, sinks]
+  sanitizer_on_path: [sources, sinks, sanitizers]
+
+rules:
+  - java/open_redirect
+
+max_static_tier: static_reachability
