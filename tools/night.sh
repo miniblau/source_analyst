@@ -147,6 +147,18 @@ for c in "${classes[@]}"; do
   fi
 done
 
+# ---- the index a human opens first ----------------------------------------
+# Deterministic, no model, and it reads the logs rather than the ledger — so it
+# reports what the run actually produced, including classes a failed leg left
+# empty. summary.txt below is the operator's account of the RUN; this is the
+# reader's account of the FINDINGS, and they answer different questions.
+if overview --logs "$logdir" --target "$(basename "$src")" --reports . \
+     > "$outdir/overview.md" 2>"$outdir/overview.err"; then
+  note "-" overview ok "$outdir/overview.md"
+else
+  note "-" overview FAILED "see $outdir/overview.err"
+fi
+
 # ---- the summary, which is the whole point --------------------------------
 {
   echo "# night run"

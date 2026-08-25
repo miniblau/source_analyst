@@ -19,6 +19,7 @@ belief = "source_analyst.belief.cli:main"
 brief = "source_analyst.lifecycle.brief:main"
 admit = "source_analyst.lifecycle.admit:main"
 render = "source_analyst.lifecycle.render:main"
+overview = "source_analyst.lifecycle.overview:main"
 run_agent = "source_analyst.lifecycle.run_agent:main"
 score = "source_analyst.lifecycle.score:main"
 
