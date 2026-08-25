@@ -69,6 +69,18 @@ def load_labels(target: str, vuln_class: str) -> dict[str, Any]:
             raise ScoreError(f"{path}: every site needs `sink` and `label`: {site}")
         if known and site["label"] not in known:
             raise ScoreError(f"{path}: unknown label {site['label']!r} at {site['sink']}")
+        # This map is keyed by sink, so a repeated sink used to overwrite its
+        # predecessor and vanish — the oracle silently shrinking while still
+        # reporting `labelled_sites` as though nothing were missing. Found while
+        # labelling path_traversal, where one sink is reached from three separate
+        # endpoints and the natural first draft was one entry per (source, sink)
+        # pair. A shorter oracle reads as an easier target, which is the same
+        # failure shape as a short log reading as a complete one.
+        if site["sink"] in sites:
+            raise ScoreError(
+                f"{path}: duplicate site {site['sink']!r}. This file is keyed by sink;"
+                " a sink reached from several entry points is ONE site whose `sources`"
+                " and `why` cover them all.")
         sites[site["sink"]] = site
     doc["by_sink"] = sites
     return doc

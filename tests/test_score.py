@@ -55,6 +55,44 @@ def hyp(fact_id: str, status: str, conf: float = 0.5, **kw) -> dict:
     return records.record("hypothesis", base, src="agent:test")
 
 
+class TestGroundTruthLoading(unittest.TestCase):
+    """The oracle must not shrink quietly.
+
+    `by_sink` is keyed by sink, so a repeated sink silently overwrote its
+    predecessor: the file said five sites, the scorer counted three, and nothing
+    anywhere said so. A shorter oracle is an easier target, which is the flattering
+    direction — the one failure mode this module exists to refuse.
+    """
+
+    def _load(self, sites: list[dict]) -> dict:
+        d = Path(tempfile.mkdtemp())
+        (d / "t.sqli.yaml").write_text(yaml.safe_dump(dict(TRUTH, sites=sites)))
+        old = os.environ.get("SOURCE_ANALYST_GROUND_TRUTH")
+        os.environ["SOURCE_ANALYST_GROUND_TRUTH"] = str(d)
+        try:
+            return sc.load_labels("t", "sqli")
+        finally:
+            if old is None:
+                del os.environ["SOURCE_ANALYST_GROUND_TRUTH"]
+            else:
+                os.environ["SOURCE_ANALYST_GROUND_TRUTH"] = old
+
+    def test_duplicate_sink_is_rejected_not_collapsed(self):
+        with self.assertRaises(sc.ScoreError) as cm:
+            self._load([
+                {"sink": "A.java:20", "label": "vulnerable", "why": "reached from one entry"},
+                {"sink": "A.java:20", "label": "vulnerable", "why": "reached from another"},
+            ])
+        self.assertIn("duplicate site", str(cm.exception))
+
+    def test_distinct_sinks_still_load(self):
+        doc = self._load([
+            {"sink": "A.java:20", "label": "vulnerable", "why": "one"},
+            {"sink": "A.java:21", "label": "vulnerable", "why": "another line, another site"},
+        ])
+        self.assertEqual(len(doc["by_sink"]), 2)
+
+
 class TestConflationsRefused(unittest.TestCase):
     def score(self, log):
         return sc.score(log, truth(), "sqli", None)
