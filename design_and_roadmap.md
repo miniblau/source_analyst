@@ -1068,3 +1068,50 @@ This is what `score` reads; agents are **measured** against it, not tested.
 spine cleanly across three languages without touching the template blind-spot. XSS is
 class #2, deferred until `struct_grep` stitching exists (GraphQL/template work),
 proving the "Joern-blind but JSONL-unified" path.
+
+**Path traversal took the #2 slot instead — decided 2026-08-25.** XSS's prerequisite is
+still absent: `struct_grep scan` exists and is corpus-tested, but `brief._cases()`
+iterates CPG `flow` facts, so an opengrep `sink_candidate` can only *enrich* a case a
+flow already created and never create one. A class whose sinks Joern cannot see
+therefore briefs zero cases, and XSS stays deferred exactly as this section says.
+
+Path traversal was built ahead of it because it is reachable by the EXISTING query
+vocabulary, which made it the cheapest possible test of the invariant-#3 claim that a
+new class is data and no code. That claim had never been tested — one class cannot test
+it. The result: manifests, an opengrep rule set, a two-sided fixture and a labelled set,
+with **zero changes to any tool, query or schema**. What it did break was two latent
+single-class assumptions, which is the finding: `test_manifest` destructured
+`applicable()` as though exactly one class could apply, and `score`'s ground-truth
+loader keyed `by_sink` last-wins, so a sink labelled from several entry points silently
+shrank the oracle. Both are fixed; neither was reachable while only one class existed.
+
+**Open redirect took slot #3 — 2026-08-25.** Chosen for something neither earlier
+class could provide: WebGoat contains a genuine **negative** for it. Both
+`OpenRedirectRealRedirect` and `OpenRedirectSecureController` flow from an annotated
+source into `new ModelAndView("redirect:" + …)`, and the substrate is right to report
+both — the safe one's tainted value is an `Integer` used as a key into a fixed
+allowlist, so what reaches the sink came out of a hardcoded table. That makes it the
+first class whose **precision can be earned by rejecting something** rather than
+assumed from a set with nothing to reject: the stub runner scores 0.5 here against
+0.885 on sqli and 1.0 on path_traversal. It is also the first class to need
+`full_name_filter` — Spring redirects are constructor calls, and `<init>` matches 490
+sites on WebGoat, so the filter is what makes the sink nameable at all.
+
+**One log per class, forced by a gap — found 2026-08-25.** CPG facts carry no
+`vuln_class` (only opengrep facts do) and `brief` does not filter facts by class, so
+several classes sharing one log let the first one briefed consume every `flow` in it.
+Measured with the stub: `open_redirect` briefed 34 cases instead of 2, filed them all
+under its own class, and the other two classes reported "nothing waiting" while the
+run summary said no leg had failed. `tools/night.sh` therefore gives each class its
+own log. This contradicts §10.4's single-log intent and the resolution is to tag CPG
+facts with a class and filter in `brief` — a deliberate `v` bump, **not yet done**.
+Until then the single-log claim holds only for a single-class run, which is what
+every run before this one happened to be.
+
+Its sink shape is also the useful counterweight to SQLi's: the tainted value is the
+**receiver** (`file.createNewFile()`, `arg_index: "0"`), not an argument, so the generic
+dataflow query is now exercised on two genuinely different shapes rather than one.
+Known gap, named in the pattern file: `arg_index` is a single index per query run, so
+constructor sinks (`new File(dir, name)`) and static path APIs (`Files.readAllBytes`)
+are not bound by this class. Letting one class bind several indices is a substrate
+increment, not a manifest one.
