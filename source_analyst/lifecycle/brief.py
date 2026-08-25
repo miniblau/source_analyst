@@ -78,8 +78,19 @@ def _cases(log: list[dict]) -> list[dict]:
         if prev is None or ("arg_is_literal" not in prev and "arg_is_literal" in f):
             sinks[key] = f
 
+    # A case is judged when the `flow` fact that DEFINES it — this one (source, sink)
+    # pair — has been cited. NOT when any of its facts has: cases share the sink
+    # inventory and sanitizer records, so two parameters reaching one sink have two
+    # thirds of their evidence in common. Keying on the union silently marked a case's
+    # siblings done. Measured: 9 of 26 WebGoat cases never judged, with `brief`
+    # reporting nothing left to do.
+    judged_flows = {e for h in log if h.get("type") == "hypothesis"
+                    for e in h.get("evidence", [])}
+
     out = []
     for key, flow in sorted(flows.items(), key=lambda kv: tuple(str(x) for x in kv[0])):
+        if flow["id"] in judged_flows:
+            continue
         check = checks.get(key)
         sink = sinks.get((flow.get("sink_file"), flow.get("sink_line")))
         evidence = [flow["id"]] + ([check["id"]] if check else []) + ([sink["id"]] if sink else [])
@@ -453,17 +464,13 @@ def main(argv: list[str] | None = None) -> int:
 
     if args.agent == "hypothesize":
         rows = _cases(log)
-        # Already judged. This leg reads cases off FACTS, so nothing removed a case
-        # once a hypothesis existed for it: re-running the pass — after an
-        # interruption, or just twice — wrote a second hypothesis for every case, and
-        # hypotheses are ULID events so nothing dedupes them. `score` then counts one
-        # site twice and calibration gets duplicate points.
+        # `_cases` has already dropped the cases a hypothesis exists for, so this leg
+        # is self-consuming: re-running it after an interruption picks up what is left
+        # instead of writing a second hypothesis for every case. (Hypotheses are ULID
+        # events, so nothing downstream would dedupe them.)
         #
         # To compare two models, give each its own log. That is what `--src` filtering
         # cannot do for you once both have written to the same one.
-        judged = {e for h in log if h.get("type") == "hypothesis"
-                  for e in h.get("evidence", [])}
-        rows = [r for r in rows if not (set(r["evidence"]) & judged)]
         if args.limit:
             rows = rows[:args.limit]
         header["status_filter"] = None
