@@ -76,6 +76,12 @@ runner="${SOURCE_ANALYST_RUNNER:-$(python3 -c 'import yaml;print(yaml.safe_load(
 started=$(date -u +%Y-%m-%dT%H:%M:%SZ)
 outdir="var/night.$(date -u +%Y%m%dT%H%M%SZ)"
 mkdir -p "$outdir"
+# Owner-only, for the same reason belief/store and run_agent do it: this directory
+# ends up holding the reports, which quote the client's source, and the per-class
+# logs, which contain it wholesale. `var/` is already 0700 so this is defence in
+# depth rather than a fix — but the run writes wherever it is pointed, and the
+# report is the single most sensitive artifact the system produces.
+chmod 700 "$outdir" 2>/dev/null || true
 
 # One line per (class, leg, outcome). Written as it happens, so an interrupted run
 # still explains itself — the summary at the end is a rendering of this, not a
@@ -86,6 +92,7 @@ note() { printf '%s\t%s\t%s\t%s\n' "$1" "$2" "$3" "${4:-}" >> "$ledger"; }
 
 logdir="${NIGHT_LOG_DIR:-$outdir/logs}"
 mkdir -p "$logdir"
+chmod 700 "$logdir" 2>/dev/null || true
 echo "night: $runner | classes: ${classes[*]}" >&2
 echo "night: output -> $outdir | logs -> $logdir (one per class)" >&2
 

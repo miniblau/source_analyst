@@ -93,14 +93,26 @@ def summarize(records: list[dict]) -> dict[str, Any]:
 PREVIEW = 5
 
 
+# A narrative with neither break would otherwise be printed whole, and a paragraph
+# per class turns the index back into the thing it exists to replace.
+GIST_MAX = 220
+
+
 def first_sentence(text: str) -> str:
-    """The narrative's opening clause, which is the part written for a human."""
+    """The narrative's opening clause, which is the part written for a human.
+
+    Narratives are prose written for the class manifest, not for this page, so this
+    cuts at the first natural break and falls back to a hard cap rather than
+    trusting that one exists.
+    """
     flat = " ".join((text or "").split())
     cut = flat.find(", so ")
-    if cut == -1:
-        cut = flat.find(". ")
-        return flat[:cut + 1] if cut != -1 else flat
-    return flat[:cut] + "."
+    if cut != -1:
+        return flat[:cut] + "."
+    cut = flat.find(". ")
+    if cut != -1:
+        return flat[: cut + 1]
+    return shorten(flat, GIST_MAX)
 
 
 def shorten(s: str, limit: int = 100) -> str:
@@ -163,7 +175,7 @@ def main(argv: list[str] | None = None) -> int:
         try:
             vc = load_class(name)
             s["title"], s["gist"] = vc.title, first_sentence(vc.narrative)
-        except Exception:
+        except (ManifestError, OSError):
             s["title"], s["gist"] = name, ""
         rows.append(s)
 
@@ -176,7 +188,7 @@ def main(argv: list[str] | None = None) -> int:
             # class that exists, and it was written for a human. One sentence of it
             # is what turns a row in a table into something a reader recognises.
             s["gist"] = first_sentence(vc.narrative)
-        except (ManifestError, Exception):
+        except (ManifestError, OSError):
             # A log whose class is no longer in the manifest still gets a row —
             # dropping it would shorten the page silently.
             s["title"], s["gist"] = name, ""

@@ -29,7 +29,9 @@ suite skips cleanly when its binary is absent, so neither blocks work on the oth
 
 ## Reviewing a Java repo for SQL injection
 
-That pair — SQLi × Java — is the only one currently built and corpus-validated.
+Three classes are built and corpus-validated, all against Java: `sqli`,
+`path_traversal` and `open_redirect`. `manifest classes` lists them. The walk
+below uses SQLi; substitute any of the three.
 
 ```bash
 cpg build --src /path/to/project          # once per tree, cached on a content hash
@@ -65,6 +67,11 @@ in a project-level `.opencode/opencode.json` makes it hunt for the provider's np
 package in a directory that has none and hang silently. It offers no schema hook, so
 it is the peer of `openai_compat_free` — a scorecard from it measures formatting as
 well as judgement, and is not comparable to a constrained run.
+
+**Not for a shared host.** `opencode run` takes its message in argv, so the briefing
+— client source, verbatim — is readable from `/proc/<pid>/cmdline` by every account
+on the machine for as long as the batch runs. `openai_compat` passes the same prompt
+down a pipe and does not. The runner warns about this on every invocation.
 
 ## Running every class unattended
 
@@ -181,8 +188,18 @@ Against a labelled corpus set only — your own code has no ground truth:
 score --class sqli --target webgoat --src agent:hypothesize
 ```
 
-The floor to beat is `tests/stub_runner.py`, which judges nothing: **precision 0.885,
-confidence separation 0.0**. Read `calibration` rather than `separation` for a good
+The floor to beat is `tests/stub_runner.py`, which judges nothing — and the floor is
+per class, because it depends entirely on how much of that class's labelled set is
+noise: **sqli 0.885, open_redirect 0.333, path_traversal 1.0**. Separation is 0.0 for the
+first two and `null` for the third — not the same thing, and the difference is the
+point: 0.0 means the stub expressed no opinion, `null` means nothing was there to
+measure against.
+
+A floor of 1.0 is not a high bar, it is an absent one: `path_traversal`'s labelled
+set is all `vulnerable`, so there is nothing to reject and precision cannot fail.
+`open_redirect` is the only set with labelled negatives (2 of 3 sites), which makes
+it the only class where precision is *earned* and where `separation` is measurable
+at all. Read `calibration` rather than `separation` for a good
 model — separation is undefined when a model keeps no noise.
 
 ## What it cannot do

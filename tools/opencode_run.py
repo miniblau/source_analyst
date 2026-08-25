@@ -28,6 +28,21 @@ assumed, on the local MoE:
     every tool switched off, which is what makes the call a single-shot completion
     instead of an agent loop.
 
+**THE BRIEFING GOES IN ARGV, WHICH IS PUBLIC ON THIS MACHINE.** `opencode run`
+takes its message as a positional argument and there is nowhere else to put it, so
+for as long as the process runs — minutes per batch on local hardware — the full
+prompt sits in `/proc/<pid>/cmdline`, which is mode 0444 and readable by every
+account on the box. That prompt is the briefing: client source, verbatim. It is the
+exact material `run_agent` writes to a 0600 transcript and `belief` keeps under a
+0700 directory, and this runner hands it to `ps`.
+
+Consequences, stated plainly rather than buried: do NOT use this runner on a shared
+or multi-user host, and prefer `openai_compat`, which writes the prompt to a pipe
+and never exposes it. The fix, if this runner ever needs to be safe there, is
+opencode's `-f/--file` attachment — put the briefing in a 0600 file and pass a
+short instruction in argv instead. That is untested here and is not done, because
+changing it silently would be worse than saying so.
+
 **No constrained decoding.** opencode exposes no hook for a JSON schema, so this
 runner is the equivalent of `openai_compat_free`, never of `openai_compat`. What
 the model returns is what it chose to return, and the format is part of what you
@@ -120,6 +135,12 @@ def main() -> int:
 
     print(f"opencode_run: {' '.join(cmd[:-1])} (+{len(payload)} bytes of prompt)",
           file=sys.stderr)
+    # Said every run, not just documented: the prompt is about to be visible in
+    # /proc to every account on this machine, and whoever is running it is entitled
+    # to know that before the source of a client's repo goes there.
+    print("opencode_run: WARNING the briefing is passed in argv and is readable via "
+          "/proc/<pid>/cmdline while this runs — not safe on a shared host; use "
+          "openai_compat there", file=sys.stderr)
     try:
         proc = subprocess.run(cmd, capture_output=True, text=True)
     except FileNotFoundError:
