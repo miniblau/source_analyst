@@ -287,10 +287,18 @@ class TestSelection(unittest.TestCase):
         """§10.1: applies_to runs ahead of pattern files by design. The gap must
         surface — silently dropping it reports a language as clean that nothing
         ever looked at."""
-        [(vc, realized, unrealized)] = applicable(["java", "js"])
-        self.assertEqual(vc.name, "sqli")
-        self.assertEqual(realized, ["java"])
-        self.assertEqual(unrealized, ["js"])
+        rows = applicable(["java", "js"])
+        self.assertTrue(rows, "no class applied to java — the manifest tree is broken")
+
+        # The property is every class's, not sqli's. This assertion used to
+        # destructure a single row, which quietly encoded "there is exactly one
+        # vuln class" and broke the moment path_traversal was added — a test
+        # asserting the shape of the corpus rather than the behaviour under test.
+        for vc, realized, unrealized in rows:
+            self.assertEqual(realized, ["java"], vc.name)
+            self.assertEqual(unrealized, ["js"], vc.name)
+
+        self.assertIn("sqli", {vc.name for vc, _, _ in rows})
 
     def test_empty_manifest_tree_is_a_problem_not_a_pass(self):
         """An empty tree validated ok:true/exit 0, so a mis-pointed

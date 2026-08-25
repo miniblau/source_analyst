@@ -1,0 +1,82 @@
+# Ground truth for the WebGoat path-traversal case set — the oracle a hypothesizer
+# is scored against.
+#
+# Labels are DATA, like everything else about a vuln class (invariant #3). `score`
+# reads this file and knows nothing about what a label means beyond the vocabulary
+# below; adding a target or a class is a new file here, never a code change.
+#
+# Every label was checked by reading the method at the cited line, not recalled from
+# what WebGoat is famous for. `why` records what was read, so a wrong label can be
+# argued with rather than trusted.
+#
+# Scope: the 3 distinct sink sites the substrate reported on the pinned
+# commit with manifests/patterns/java/path_traversal.yaml, across 5 (source, sink)
+# pairs — ProfileUploadBase:52 is reached from three different endpoints and is ONE
+# site here, because `score` keys this file by sink. A site the substrate
+# never reached cannot be scored here — that is a substrate gap and belongs in
+# §10.6, not in a model's score. Two shapes are known-missing by construction and
+# are named in the pattern file: constructor sinks and static Files.* calls, both
+# of which need an `arg_index` this class cannot yet bind.
+
+target: webgoat
+commit: 7517acca95d9851da706452454c223dd13545ef4
+class: path_traversal
+language: java
+
+# vulnerable      untrusted input chooses the path of a filesystem operation; a
+#                 hypothesizer that refutes this has produced a false negative,
+#                 the expensive error
+# not_this_class  the sink name matched an operation that is not filesystem access
+#                 on an attacker-chosen path; keeping it is noise
+labels: [vulnerable, not_this_class]
+
+sites:
+  - sink: src/main/java/org/owasp/webgoat/lessons/pathtraversal/ProfileUploadBase.java:52
+    sources: [fullName, file]
+    entries:
+      - src/main/java/org/owasp/webgoat/lessons/pathtraversal/ProfileUpload.java:41
+      - src/main/java/org/owasp/webgoat/lessons/pathtraversal/ProfileUploadFix.java:41
+      - src/main/java/org/owasp/webgoat/lessons/pathtraversal/ProfileUploadRemoveUserInput.java:39
+    label: vulnerable
+    why: >-
+      One sink — `new File(uploadDirectory, fullName)` at line 51, createNewFile()
+      at 52 — reached from three endpoints, and attacker-controlled through all
+      three. ProfileUpload passes @RequestParam fullName unmodified. ProfileUploadFix
+      passes fullName.replace("../", ""). ProfileUploadRemoveUserInput drops the form
+      field and passes file.getOriginalFilename() instead. Nothing canonicalizes.
+    discriminator: >-
+      Two of the three endpoints are named for their mitigation and neither
+      mitigates. The `replace("../", "")` is one non-repeating pass, so "....//"
+      survives it — the path_traversal twin of SqlInjectionLesson8, and a reasoner
+      that refutes on the presence of a sanitizer candidate produces a false
+      negative. RemoveUserInput takes no name parameter at all, so it reads as
+      mitigated from the signature; the taint simply moved into the MultipartFile
+      filename, which the client sets.
+
+  - sink: src/main/java/org/owasp/webgoat/lessons/pathtraversal/ProfileUploadRetrieval.java:108
+    sources: [getParameter]
+    entries:
+      - src/main/java/org/owasp/webgoat/lessons/pathtraversal/ProfileUploadRetrieval.java:99
+    label: vulnerable
+    why: >-
+      request.getParameter("id") is concatenated into
+      `new File(catPicturesDirectory, id + ".jpg")` at line 101 and the resulting
+      File is probed with exists() at 108, disclosing which paths resolve.
+    discriminator: >-
+      A guard at lines 93-96 rejects the request when getQueryString() contains
+      ".." or "/", which reads as a complete defence. It inspects the RAW query
+      string while the sink consumes the DECODED parameter, so %2e%2e%2f passes the
+      check and still traverses. Arguing this site from the presence of the guard
+      gets it wrong.
+
+  - sink: src/main/java/org/owasp/webgoat/lessons/pathtraversal/ProfileUploadRetrieval.java:117
+    sources: [getParameter]
+    entries:
+      - src/main/java/org/owasp/webgoat/lessons/pathtraversal/ProfileUploadRetrieval.java:99
+    label: vulnerable
+    why: >-
+      The same tainted File as the site above, reached on the not-found branch:
+      catPicture.getParentFile().listFiles() lists whichever directory the
+      attacker-chosen path resolved into, and the names are returned in the body.
+      Same root cause, a distinct sink line and a distinct consequence
+      (enumeration rather than existence disclosure).

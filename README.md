@@ -55,6 +55,79 @@ render --class sqli --target "Client Project" > report.md
 llama.cpp, Ollama's `/v1`, LM Studio, vLLM, a hosted API. Which one is
 `LLM_BASE_URL`, never a line in this repo.
 
+`SOURCE_ANALYST_RUNNER=opencode` hosts the same agents on opencode instead, via
+`tools/opencode_run.py` — the binary takes its message as an argv positional and
+never reads stdin, and it injects any `AGENTS.md`/`CLAUDE.md` in the working tree
+into the system prompt, so the shim feeds it the payload as an argument and runs it
+out of a scratch home holding only `config/opencode/judge.md` (every tool switched
+off). Provider and model belong in opencode's **global** config; a `provider` block
+in a project-level `.opencode/opencode.json` makes it hunt for the provider's npm
+package in a directory that has none and hang silently. It offers no schema hook, so
+it is the peer of `openai_compat_free` — a scorecard from it measures formatting as
+well as judgement, and is not comparable to a constrained run.
+
+## Running every class unattended
+
+```bash
+export SOURCE_ANALYST_RUNNER=openai_compat
+export LLM_BASE_URL=http://127.0.0.1:8080/v1 LLM_MODEL=<your model>
+tools/night.sh corpus/webgoat              # every class the manifest knows
+tools/night.sh corpus/webgoat sqli         # or name them
+```
+
+`night.sh` drives facts → hypothesize → trace → report → render → score for each
+class. `pass.sh` stops on a failed batch, which is right for one pass and wrong for a
+queue — so this isolates failure per class and per leg, and always ends with
+`var/night.<ts>/summary.txt` naming what ran, what failed, and what is still owed.
+`NIGHT_SKIP_TRACE=1` drops the long pole; trace is roughly 6 minutes a batch.
+
+**Each class gets its own log, and must.** CPG facts carry no `vuln_class` — only
+opengrep facts do — and `brief` does not filter facts by class, so classes sharing a
+log let the first one briefed consume every flow in it. Measured: one class briefed 34
+cases instead of 2 while the others reported nothing waiting.
+
+**Use `--parallel 1` on llama-server for these runs.** llama.cpp divides `-c` among
+slots, so `--parallel 2` halves the context a briefing actually gets; a report batch
+overruns a 16k slot and dies mid-record. Nothing serial needs the second slot.
+
+Validate any change to the chain with the stub first — it runs every leg in about a
+minute with no model, and the floors it produces (`sqli` 0.885, `open_redirect` 0.5)
+are what a real model has to beat.
+
+## Driving it from opencode
+
+`.opencode/agent/orchestrator.md` is a **symlink** to `agents/orchestrator.md`, so
+opencode runs the same driver prompt the design specifies and there is no second copy
+to drift. Launch opencode from the activated venv — its shell tool inherits that
+environment, and without it none of the console scripts are on `PATH`:
+
+```bash
+cd ~/projects/source_analyst && source .venv/bin/activate
+opencode --agent orchestrator -m llamacpp/<same-model-as-the-runner>
+```
+
+**Pin both sides to the same model.** The orchestrator is one model and the agents it
+drives are another, and llama-server's router runs `--models-max 1`: name two
+different models and every hop swaps ~20GB. Named the same, the two never fight —
+`pass.sh` is synchronous, so the orchestrator is idle while a pass runs and the pass
+is done before the orchestrator speaks again.
+
+**Never let the orchestrator run a whole pass inside one shell call.** A pass is hours
+and the shell tool's timeout is minutes, so the call dies while the work carries on
+orphaned. Detach it and let the orchestrator poll:
+
+```bash
+nohup tools/pass.sh hypothesize sqli java 4 > var/pass.hypothesize.log 2>&1 &
+```
+
+`pass.sh` drains and is resumable, so a detached pass that is interrupted between
+batches picks up exactly what is left.
+
+Working *in* this repo, opencode also injects `CLAUDE.md` into the system prompt, on
+top of the 4KB driver prompt — one trivial command measured 4m41s end to end on the
+local MoE. That tax is the price of an interactive driver here; the `opencode` runner
+avoids it by running out of a scratch home (above).
+
 ## Digging deeper
 
 `trace` is the only loop. Each turn the *substrate* decides which methods a

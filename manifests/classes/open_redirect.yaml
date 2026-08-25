@@ -1,0 +1,45 @@
+# Open redirect — the language-agnostic concept (design §10.1, §10.7).
+#
+# This file holds NO patterns. A pattern is a frontend-specific realization and
+# lives in manifests/patterns/<lang>/open_redirect.yaml.
+#
+# Class #3, added 2026-08-25. Chosen for a reason the first two could not serve:
+# WebGoat contains a genuine NEGATIVE for it — a controller whose tainted value
+# reaches the redirect only as a key into a fixed allowlist — so this is the
+# first class whose precision can be earned by rejecting something rather than
+# assumed from a set with nothing to reject.
+
+class: open_redirect
+title: Open redirect
+applies_to: [java, js, swift]
+
+narrative: >-
+  A value the caller controls decides where the response sends the user, so an
+  attacker can point a link that legitimately belongs to this site at a host of
+  their choosing. The bug is that the destination is taken as text rather than
+  chosen from a fixed set: a value used as a key into an allowlist, or checked
+  to be a relative path on this origin, is not vulnerable even though it still
+  reaches the redirect. Consequence is credible phishing under the victim's own
+  domain, and the theft of anything the next page is trusted with — tokens in a
+  query string, an OAuth code, a password-reset link.
+
+seed_hypotheses:
+  - The destination is concatenated onto a fixed prefix, which looks constraining
+    but is not — a value beginning with a scheme, or with `//`, escapes the prefix
+    entirely and names a foreign host.
+  - The value is validated with a prefix or `startsWith` check that an attacker
+    satisfies with a lookalike host or a path that later redirects onward.
+  - The tainted value is a key or an index rather than the destination itself, so
+    what reaches the sink came from a fixed table and the flow is not the bug —
+    the type of the source settles this faster than reading the sink.
+  - The redirect is performed by a framework view name rather than an HTTP header,
+    so the sink is a constructor and the taint is a string concatenation inside it.
+  - The destination is only used after a login or state change, making the
+    redirect a step in a chain (token hand-off, OAuth callback) rather than a
+    standalone navigation.
+
+max_static_tier: static_reachability
+
+references:
+  - https://cwe.mitre.org/data/definitions/601.html
+  - https://owasp.org/www-community/attacks/Unvalidated_Redirects_and_Forwards

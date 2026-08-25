@@ -1,0 +1,80 @@
+# Ground truth for the WebGoat open-redirect case set — the oracle a hypothesizer
+# is scored against.
+#
+# Labels are DATA, like everything else about a vuln class (invariant #3).
+#
+# THIS IS THE FIRST SET IN THE CORPUS WITH REAL NEGATIVES — two of three sites.
+# A hypothesizer that keeps everything scores precision 0.33 here. The sqli and
+# path_traversal sets are all-vulnerable, so `score` reports `mean_on_noise` and
+# `separation` as null for both and their precision is assumed rather than earned —
+# nothing was there to reject. Here a hypothesizer that keeps everything scores
+# precision 0.5, and one that refutes the safe controller for the WRONG reason
+# (the class is called Secure) is right by accident. That distinction is the point
+# of this file.
+#
+# Every label was checked by reading the method at the cited line.
+#
+# Scope: the 3 (source, sink) pairs the substrate reported on the pinned commit.
+# WebWolfRedirect and HammerHead also construct redirects but no annotated source
+# reaches them, so they were never offered and cannot be scored here.
+
+target: webgoat
+commit: 7517acca95d9851da706452454c223dd13545ef4
+class: open_redirect
+language: java
+
+# vulnerable      the caller chooses the destination as text; refuting it is a
+#                 false negative, the expensive error
+# not_this_class  the flow is real but the tainted value never becomes the
+#                 destination; keeping it is noise
+labels: [vulnerable, not_this_class]
+
+sites:
+  - sink: src/main/java/org/owasp/webgoat/lessons/openredirect/OpenRedirectRealRedirect.java:21
+    sources: [url]
+    label: vulnerable
+    why: >-
+      @RequestParam("url") String url is concatenated straight into the view name
+      at `new ModelAndView("redirect:" + url)`. Nothing inspects it, and the
+      "redirect:" prefix constrains nothing — a value starting with a scheme or
+      with // names a foreign host.
+
+  - sink: src/main/java/org/owasp/webgoat/lessons/openredirect/OpenRedirectSecureController.java:28
+    sources: [destId]
+    label: not_this_class
+    why: >-
+      The flow is real and the substrate is right to report it, but the tainted
+      value never becomes the destination. destId is an Integer used as a KEY into
+      a hardcoded three-entry Map at line 27
+      (DESTINATIONS.getOrDefault(destId, "/welcome.mvc")); what reaches line 28 is
+      a value from that fixed table, and an unknown key yields the default. The
+      caller can choose among three internal paths and nothing else.
+    discriminator: >-
+      The evidence needed to reject this is in the case and does not require
+      reading the class name. `source_code` is
+      `@RequestParam(name = "destId", defaultValue = "1") Integer destId` — an
+      Integer cannot carry a URL — and the path steps show the getOrDefault call
+      standing between the source and the sink. Note that `sink_arg_type` is
+      java.lang.String for BOTH sites, because it describes the concatenation
+      result, so a reasoner that stops at the sink's argument type learns nothing
+      here and must look at the source and the steps.
+      Rejecting this because the class is named "Secure" is the failure this site
+      is here to catch: a name is the weakest argument available, and being right
+      by accident is not being right.
+
+  - sink: src/main/java/org/owasp/webgoat/webwolf/jwt/JWTToken.java:98
+    sources: [formData]
+    label: not_this_class
+    why: >-
+      `jws.setHeader(k, v)` sets a JOSE header claim on a JsonWebSignature. It is
+      not an HTTP response header and performs no navigation, so no destination is
+      being chosen and the class does not apply. The flow itself is real — form
+      data does reach it.
+    discriminator: >-
+      Pure short-name collision, the open-redirect equivalent of SQLi's
+      ProfileUploadBase.execute: `setHeader` is kept in the sink list because
+      `response.setHeader("Location", url)` IS a redirect on real code, and the
+      manifest triages rather than silently filtering. The refutation available
+      from the evidence is the receiver's type and the call site's own code, not
+      the file's package — arguing this from "it is in a jwt package" is a guess
+      about code nobody read.

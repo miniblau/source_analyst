@@ -1,0 +1,51 @@
+# Path traversal — the language-agnostic concept (design §10.1, §10.7).
+#
+# This file holds NO patterns. A pattern is a frontend-specific realization and
+# lives in manifests/patterns/<lang>/path_traversal.yaml. Adding a language to
+# this class is one new pattern file and zero edits here.
+#
+# Class #2. §10.7 freezes XSS in this slot, deferred until struct_grep stitching
+# exists; this class was built first because it is reachable by the EXISTING
+# query vocabulary, so it tests the invariant-#3 claim — new class = new data,
+# zero code change — which one class alone could never test. Recorded 2026-08-25.
+
+class: path_traversal
+title: Path traversal
+applies_to: [java, js, swift, c]
+
+narrative: >-
+  A value the caller controls reaches a filesystem operation as part of the
+  path, so the attacker chooses which file is read, written, created or
+  removed rather than merely which name is used inside a directory the
+  developer intended. The bug is that the path is resolved before it is
+  constrained: a name checked after canonicalization, or confined by opening
+  relative to a directory handle, is not vulnerable. Consequence ranges from
+  reading adjacent files to overwriting code that later executes, depending on
+  the operation and the privileges of the process.
+
+# What a reviewer should go looking for once a candidate appears. These are
+# prompts for investigation, never assertions — each is a hypothesis until a
+# substrate query supports it with a src.
+seed_hypotheses:
+  - A defence strips `../` textually rather than canonicalizing, so it fails on
+    a doubled or encoded separator (`....//`, `..%2f`) that reconstitutes the
+    traversal after the replacement runs.
+  - The path is canonicalized and then checked, but the check compares a prefix
+    string rather than a directory containment, so a sibling directory sharing
+    the prefix passes.
+  - The tainted component is a filename supplied by a file upload rather than a
+    query parameter, so the source is a multipart field and the taint enters
+    through a framework type rather than a String.
+  - Traversal is confined to the extension or the basename, so the reachable
+    impact is overwrite of a fixed file rather than arbitrary read — worth
+    separating, because the two carry very different consequences.
+  - The write lands in a directory that is later served or executed, turning a
+    traversal into code execution, which is a different finding than disclosure.
+
+# Verification tiers this class can honestly reach without a running target
+# (§6). Static-only evidence stops at static_reachability — never `confirmed`.
+max_static_tier: static_reachability
+
+references:
+  - https://cwe.mitre.org/data/definitions/22.html
+  - https://owasp.org/www-community/attacks/Path_Traversal

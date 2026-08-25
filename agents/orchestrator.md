@@ -17,7 +17,7 @@ empty result is not a clean bill of health; see *Reading nothing* below.
 
 ## Orientation
 
-1. `manifest list` / `manifest validate` — what classes and languages exist. A
+1. `manifest classes` / `manifest validate` — what classes and languages exist. A
    manifest tree with no classes is a broken install, not a clean result.
 2. `manifest detect --src <tree>` — which languages are actually present, and how
    much of the tree any class can currently reach. Report the **coverage gaps** to

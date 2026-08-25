@@ -1,0 +1,84 @@
+# Path-traversal sink patterns for Java (design §10.1 — vuln knowledge is data,
+# never code).
+#
+# `struct_grep` runs this file and knows nothing about paths. Two rules, mirroring
+# the sqli set:
+#
+#   java_path_sink          every filesystem-access and path-construction site —
+#                           the inventory, for parity with the CPG's sink query
+#                           and for "did we see it at all"
+#   java_path_sink_dynamic  the subset whose path component is not a plain
+#                           literal — the actual hypothesis candidate
+#
+# WHY THE DYNAMIC RULE TARGETS CONSTRUCTION, NOT ACCESS. The CPG side of this
+# class taints the RECEIVER (`file.createNewFile()`, arg 0): the dangerous path
+# is in the object, not in an argument. opengrep has no dataflow, so it cannot
+# tell a tainted receiver from a safe one and asking it to would be asking a
+# pattern matcher to do reachability. What it CAN see is the literal text of the
+# construction — `new File(dir, name)` with a non-literal `name` — so that is
+# what the dynamic rule matches. The two substrates deliberately look at
+# different ends of the same bug and are stitched by file:line in the log.
+#
+# NOTE: pattern search proves no reachability. A hit here is a sink that exists,
+# not a sink an attacker reaches — tier that honestly (§6).
+
+rules:
+  - id: java_path_sink
+    languages: [java]
+    severity: INFO
+    message: >-
+      Filesystem path sink site.
+    metadata:
+      vuln_class: path_traversal
+      kind: sink_candidate
+      dynamic_arg: false
+    patterns:
+      - pattern-either:
+          # Path construction — where a chosen name enters a path.
+          - pattern: new File(...)
+          - pattern: new FileInputStream(...)
+          - pattern: new FileOutputStream(...)
+          - pattern: new RandomAccessFile(...)
+          - pattern: Paths.get(...)
+          - pattern: Path.of(...)
+          # Filesystem access on an already-built path.
+          - pattern: $F.createNewFile(...)
+          - pattern: $F.mkdirs(...)
+          - pattern: $F.renameTo(...)
+          - pattern: $F.listFiles(...)
+          - pattern: $F.transferTo(...)
+          - pattern: Files.$M(...)
+
+  - id: java_path_sink_dynamic
+    languages: [java]
+    severity: WARNING
+    message: >-
+      Filesystem path is built from a runtime value; the path component is not a
+      compile-time literal.
+    metadata:
+      vuln_class: path_traversal
+      kind: sink_candidate
+      dynamic_arg: true
+    patterns:
+      # `$P, ...` and `..., $P` between them cover the component that carries the
+      # attacker-chosen name at either position: `new File(userPath)` puts it
+      # first, `new File(uploadDirectory, fullName)` puts it last. WebGoat's
+      # ProfileUploadBase:51 is the two-argument form, so a first-argument-only
+      # pattern would lose the lesson this class is validated on.
+      - pattern-either:
+          - pattern: new File($P, ...)
+          - pattern: new File(..., $P)
+          - pattern: new FileInputStream($P, ...)
+          - pattern: new FileOutputStream($P, ...)
+          - pattern: new RandomAccessFile($P, ...)
+          - pattern: Paths.get($P, ...)
+          - pattern: Paths.get(..., $P)
+          - pattern: Path.of($P, ...)
+          - pattern: Files.$M($P, ...)
+      # Constant-folds: excludes a plain literal, "a" + "b", and (via opengrep's
+      # svalue propagation) a local assigned a literal. Same device as the sqli
+      # set — a parameterized control passes a literal and drops out here while
+      # staying in the inventory above, which is what makes the pair two-sided.
+      - pattern-not: new $C("...", ...)
+      - pattern-not: new $C(..., "...")
+      - pattern-not: $CLASS.$METHOD("...", ...)

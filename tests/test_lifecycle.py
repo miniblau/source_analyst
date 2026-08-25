@@ -341,6 +341,22 @@ class TestChunking(unittest.TestCase):
     def test_chunk_without_size_is_rejected(self):
         self.assertNotEqual(self.run_brief("--chunk", "1").returncode, 0)
 
+    def test_judging_one_case_does_not_retire_its_siblings(self):
+        """Cases share the sink inventory and the sanitizer record, so two parameters
+        reaching one sink have two thirds of their evidence in common. A filter keyed
+        on the union of evidence marked a case's siblings done: 9 of 26 WebGoat cases
+        were never judged and `brief` reported nothing left to do."""
+        rows = [r for r in self.rows() if r.get("kind") == "case"]
+        self.assertGreaterEqual(len(rows), 2, "fixture needs two cases to test this")
+        first = rows[0]
+        h = records.record("hypothesis", {
+            "statement": "s", "vuln_class": "sqli", "status": "needs_proof",
+            "confidence": 0.5, "evidence": first["evidence"]}, src="agent:test")
+        store.append([h], self.log)
+        left = [r for r in self.rows() if r.get("kind") == "case"]
+        self.assertEqual(len(left), len(rows) - 1, "exactly one case should retire")
+        self.assertNotIn(first["evidence"][0], [r["evidence"][0] for r in left])
+
     def test_meta_reports_the_briefing_size(self):
         """Rows are a bad proxy for size, and size is what actually fails: a two-case
         trace briefing carrying callee source ran to 15.4k tokens against a 16384

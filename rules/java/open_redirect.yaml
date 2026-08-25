@@ -1,0 +1,49 @@
+# Open-redirect sink patterns for Java (design §10.1 — vuln knowledge is data).
+#
+#   java_redirect_sink          every redirect construction site — the inventory
+#   java_redirect_sink_dynamic  the subset whose destination is not a compile-time
+#                               literal — the actual hypothesis candidate
+#
+# The two-sided device here is the same as sqli's and it works unusually well for
+# this class, because a Spring view name is USUALLY a literal ("jwt", "requests",
+# "lesson_content"). Those are not redirects at all, and the constant-fold keeps
+# them in the inventory while dropping them from the candidate set.
+#
+# NOTE: pattern search proves no reachability. A hit here is a redirect that
+# exists, not one an attacker controls — tier that honestly (§6).
+
+rules:
+  - id: java_redirect_sink
+    languages: [java]
+    severity: INFO
+    message: >-
+      Redirect / view-name construction site.
+    metadata:
+      vuln_class: open_redirect
+      kind: sink_candidate
+      dynamic_arg: false
+    patterns:
+      - pattern-either:
+          - pattern: new ModelAndView(...)
+          - pattern: new RedirectView(...)
+          - pattern: $R.sendRedirect(...)
+
+  - id: java_redirect_sink_dynamic
+    languages: [java]
+    severity: WARNING
+    message: >-
+      Redirect destination is built from a runtime value; it is not a
+      compile-time literal.
+    metadata:
+      vuln_class: open_redirect
+      kind: sink_candidate
+      dynamic_arg: true
+    patterns:
+      - pattern-either:
+          - pattern: new ModelAndView($D, ...)
+          - pattern: new RedirectView($D, ...)
+          - pattern: $R.sendRedirect($D, ...)
+      # Constant-folds a plain literal and "a" + "b". A fixed view name and a
+      # fully constant redirect both drop out here and stay in the inventory.
+      - pattern-not: new $C("...", ...)
+      - pattern-not: $R.sendRedirect("...", ...)

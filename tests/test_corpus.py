@@ -210,6 +210,107 @@ class TestGolden(unittest.TestCase):
         self.assertNotIn("sanitized", esc)
         self.assertNotIn("safe", esc)
 
+    def test_reachable_path_traversal_two_sided_fixture(self):
+        """Class #2, and the test that it needed no new query.
+
+        The whole point of path_traversal as a second class is that the same
+        generic queries serve a sink shape nothing like SQLi's: the tainted value
+        is the RECEIVER (`f.createNewFile()`), not an argument. If this passes,
+        invariant #3's "new class = new data, zero code change" is a measured
+        fact rather than a claim, which one class alone could never establish.
+        """
+        facts, meta = self._check("java_path_traversal_flow", "reachable")
+        qm = meta["query_meta"]
+        self.assertTrue(qm["dataflow_overlay"], "no dataflow overlay — emptiness would be a lie")
+
+        # Both positives take their filename from the same request parameter and
+        # land on the same sink line; only the sanitizer on one of them differs.
+        self.assertEqual({f["source_name"] for f in facts}, {"name"},
+                         [f["sink_code"] for f in facts])
+        self.assertEqual({f["source_line"] for f in facts}, {28, 44})
+        for flow in facts:
+            self.assertEqual(flow["kind"], "flow")
+            self.assertEqual(flow["source_marker"], "RequestParam")
+            self.assertEqual(flow["sink_name"], "createNewFile")
+            # THE shape assertion: argument 0 is the receiver. A regression that
+            # quietly moved this to 1 would empty the class without failing
+            # anything else, and an empty class reads as a clean one.
+            self.assertEqual(flow["sink_arg_index"], 0)
+            self.assertGreater(flow["crosses_methods"], 1, "should cross a method boundary")
+            self.assertTrue(flow["steps"])
+
+        # negatives were in scope and simply did not connect
+        self.assertGreater(qm["source_nodes"], 2)
+        self.assertGreaterEqual(qm["sink_arg_nodes"], 1)
+        self.assertEqual(qm["pairs"], 2)
+
+        # the literal-filename and sink-less controls stay dark
+        subjects = " ".join(f["subject"] for f in facts)
+        for control in ("uploadFixed", "echo"):
+            self.assertNotIn(control, subjects)
+
+    def test_sanitizer_on_path_path_traversal_fixture(self):
+        """Same sink, same line, same parameter name — only the strip() differs."""
+        facts, _ = self._check("java_path_traversal_flow", "sanitizer_on_path")
+        by_line = {f["source_line"]: f for f in facts}
+
+        # the raw upload has no candidate sanitizer on it
+        self.assertEqual(by_line[28]["candidate_count"], 0)
+        self.assertEqual(by_line[28]["reported_paths_without_sanitizer"],
+                         by_line[28]["reported_paths"])
+
+        # the stripped upload is still a flow, with the strip call named. It is
+        # also still exploitable — replace("../", "") leaves "....//" — which is
+        # exactly why this query reports the candidate and decides nothing.
+        stripped = by_line[44]
+        self.assertGreater(stripped["candidate_count"], 0)
+        self.assertIn("replace", {c["name"] for c in stripped["candidate_sanitizers"]})
+
+        # no field in the payload may express a safety verdict
+        self.assertNotIn("sanitized", stripped)
+        self.assertNotIn("safe", stripped)
+
+    def test_reachable_open_redirect_two_sided_fixture(self):
+        """The two-sided case where BOTH sides are a flow.
+
+        sqli and path_traversal both separate their sides by whether a flow exists
+        at all. Here both sides flow to the same sink from the same annotation, and
+        the query is right to report both — the difference is what the value became
+        on the way. That makes this the fixture that proves `reachable` is not
+        deciding anything: a query that tried to be clever and suppress the safe one
+        would fail here, and so would a scorer that assumed every flow is a bug.
+        """
+        facts, meta = self._check("java_open_redirect_flow", "reachable")
+        self.assertTrue(meta["query_meta"]["dataflow_overlay"])
+        by_source = {f["source_name"]: f for f in facts}
+        self.assertEqual(set(by_source), {"url", "destId"})
+
+        # Both really are flows into the same sink construction.
+        for f in facts:
+            self.assertEqual(f["kind"], "flow")
+            self.assertEqual(f["source_marker"], "RequestParam")
+            self.assertIn("redirect:", f["sink_arg_code"])
+
+        # The discriminator is the SOURCE, not the sink argument: sink_arg_type is
+        # the concatenation result and is String on both sides, so a reasoner that
+        # stops there learns nothing. Assert that explicitly — if a future change
+        # made the sink argument discriminating, the ground-truth `why` for
+        # OpenRedirectSecureController would be describing evidence that no longer
+        # exists, and this test is where that gets noticed.
+        self.assertEqual(by_source["url"]["sink_arg_type"],
+                         by_source["destId"]["sink_arg_type"])
+        self.assertIn("Integer", by_source["destId"]["source_code"])
+        self.assertIn("String", by_source["url"]["source_code"])
+
+        # The safe path is longer because the lookup stands in it.
+        self.assertGreater(by_source["destId"]["path_length"],
+                           by_source["url"]["path_length"])
+        steps = " ".join(str(s.get("code", "")) for s in by_source["destId"]["steps"])
+        self.assertIn("getOrDefault", steps)
+
+        # the literal view name is not a flow at all
+        self.assertNotIn("home", " ".join(f["subject"] for f in facts))
+
     def test_sanitizer_facts_join_with_reachable(self):
         """Both queries must agree on the (source, sink) pairs they describe."""
         fx = FIXTURES["webgoat"]

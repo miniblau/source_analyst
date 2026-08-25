@@ -53,10 +53,27 @@ runners:
     model: qwen3-coder:30b
     timeout: 1800
 
-  # Intended runner (§7). Flags depend on your opencode version and agent config;
-  # this is a starting point to adjust, not a verified invocation.
+  # §7's intended host. Verified against opencode 1.18.23 on 2026-08-25.
+  #
+  # It goes through tools/opencode_run.py rather than calling the binary directly,
+  # because `opencode run` takes its message as an argv positional and never reads
+  # stdin — piping a briefing at it hangs until the timeout. The shim also runs it
+  # out of a scratch home holding only config/opencode/judge.md, since opencode
+  # injects any AGENTS.md/CLAUDE.md in the working tree into the system prompt: in
+  # this repo that is the 16KB operating contract, measured at 86s vs 12s per call.
+  #
+  # NO CONSTRAINED DECODING — opencode exposes no schema hook, so this is the peer
+  # of openai_compat_free, not of openai_compat. Do not compare its scorecard
+  # against a constrained run and read the difference as judgement.
+  #
+  # `model` is provider/model as opencode names it; the provider itself is defined
+  # in ~/.config/opencode/opencode.jsonc. Keep provider config OUT of a project
+  # .opencode/opencode.json — opencode then hunts for the provider's npm package in
+  # a directory that has none and hangs silently instead of failing.
   opencode:
-    cmd: ["opencode", "run", "--agent", "{agent}"]
+    cmd: ["python3", "{repo}/tools/opencode_run.py",
+          "--repo", "{repo}", "--model", "{model}", "--title", "{agent}"]
+    model: llamacpp/Qwen3-Coder-30B-A3B-Instruct-UD-Q5_K_XL
     timeout: 1800
 
 # Per-agent overrides. Judgement and prose are different jobs and may deserve
