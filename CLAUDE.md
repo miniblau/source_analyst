@@ -85,8 +85,30 @@ The substrate spine. Get this right and most of the system follows.
   applied to the CPG. Confirm it's present before trusting any reachability result.
 - **An empty result is ambiguous — always disambiguate.** No path can mean (a) genuinely
   no flow, or (b) the frontend never built the edge (unresolved call, dynamic dispatch,
-  reflection, missing dependency). Before reporting "no vuln," verify the source and sink
-  nodes actually exist in the CPG. A query that can't tell these apart is not done.
+  reflection, missing dependency), or (c) *no query can see this sink shape at all*.
+  Before reporting "no vuln," verify the source and sink nodes actually exist in the CPG.
+  A query that can't tell these apart is not done. This extends past queries: a tool that
+  scanned nothing must not exit 0, and a manifest tree with no classes is a broken install,
+  not a clean bill of health.
+- **`reachableByFlows` returns representative paths, not all routes.** Proven on WebGoat
+  Lesson8: the clean 61→62 route is never enumerated, only a detour through a `replace()`.
+  So "no clean path was reported" is NOT "every route is sanitized" — that error makes a
+  live vulnerability look safer. Scope any such count to what the engine returned and name
+  the field accordingly (`reported_*`).
+- **A method node is not a method body.** `method.code` holds the *signature* only
+  (`"private String escape(String s)"`), so reading what a callee does means reading
+  the file: `cpg.metaData.root` + `method.file.name`, lines `lineNumber..lineNumberEnd`.
+  Verified on the flow fixture and on WebGoat. That the source has to be read off disk
+  is also why "no body" needs to be distinguishable from "the file moved".
+- **A library method still has a node.** `java.sql.Connection.prepareStatement` exists
+  in the CPG with `isExternal = true`, `lineNumber = None`, filename `<unknown>` and a
+  7-node AST of parameter stubs. So `.ast.size` is a bad has-a-body test, and — more
+  importantly — "not found" and "found but not readable" are *different answers*.
+  Collapsing them turns a gap in coverage into an apparent clean result.
+- **Node vocabulary is a hard boundary.** Every query today matches call nodes or annotated
+  parameters. A sink that is neither — a JSX attribute, a template expression, a config key
+  — cannot be reached by *any* manifest, only by a new query. Verified: `jssrc2cpg` builds a
+  `.jsx` file happily and produces no node for `dangerouslySetInnerHTML` at all.
 - **Portable-first matching** (§10.3). Match on method `.name` + a resolution step, not
   frontend-specific `methodFullName` regex. Java resolves cleanly; JS/Swift frontends are
   partial — expect gaps and validate empirically, tightening per-language only where the
@@ -111,6 +133,27 @@ The substrate spine. Get this right and most of the system follows.
 - **Tools own no state** beyond the log. Rerunnable, idempotent where facts are produced.
 - **The manifest is the seam** between deterministic and reasoning layers: its
   `sources/sinks/sanitizers` drive queries, its `narrative/seed_hypotheses` drive the model.
+- **Brief in batches, and say so.** The full WebGoat briefing is ~38k tokens; most
+  models cannot hold it and none reasons well across it. `brief --chunk-size` batches it,
+  and the header tells the agent it is holding a chunk — an agent given four cases must
+  not conclude four is all there is. A batch that fails stops the pass: half a pass
+  silently admitted is worse than none, because the log then looks complete.
+- **Briefings grow from upstream.** What an agent sees is assembled from the log, so
+  any leg that writes richer records enlarges every briefing downstream of it. `trace`
+  putting callee bodies into a hypothesis's evidence took the *report* briefing from
+  ~4k tokens for four cases to 14.2k, on a pass whose chunk size nobody had reason to
+  revisit. Slim in `brief` — it is the layer whose job is choosing what an agent sees —
+  and never size a briefing with bytes/4: source and fully-qualified identifiers
+  measured ~2.3 chars per token, so that estimate under-counts by 1.75x. `brief` prints
+  `bytes` for exactly this.
+- **Keep the model server warm**, for the same reason the Joern server stays warm.
+  Reloading a 20GB model per batch costs more than the inference does.
+- **`run_agent` is the seam, and the only one.** It spawns a command from
+  `config/runners.yaml` and moves bytes; it makes no API call, holds no key, and names no
+  vendor — a test fails if a provider or model name appears anywhere in `source_analyst/`.
+  So "a tool wants to make an LLM call" is still a smell: the answer is to go *through*
+  the seam, never to open a second one. `admit` remains the only door into the log, and
+  it re-validates whatever comes back.
 - **Only `trace` loops.** Keep iteration in one place; other agents are single-shot.
 - **New capability decision tree:** is it factual ground truth? → substrate tool. Is it
   vuln knowledge? → manifest. Is it interpretation/selection? → agent prompt. Nothing
@@ -123,13 +166,44 @@ The substrate spine. Get this right and most of the system follows.
 - **Corpus is the test oracle.** Golden JSONL outputs per query per fixture. A query
   change that alters golden output is reviewed, not rubber-stamped.
 - **Two-sided query tests.** Positive: the planted vuln appears. Negative: a sanitized
-  control does not. Both required before a query is trusted.
+  control does not. Both required before a query is trusted. Build the two sides from the
+  *same sink names*, so a query that passes by name-matching alone fails the test.
+- **Invariant #3 is enforced mechanically**, not by review: `test_manifest.py` greps
+  `source_analyst/**.py` and every query body for sink/source tokens. If you need one in
+  code, you are about to break the manifest seam.
 - **Determinism tests.** Same input → byte-identical facts. Re-running a query produces
   no duplicate facts (content-hash idempotence holds).
 - **Projection tests.** Belief store rebuilt from the log equals the live projection;
   latest-wins keying on `subject+predicate+object` is exercised with a supersede case.
 - **The deterministic core is tested with zero LLM calls.** Agent prompts are evaluated
   separately and empirically, never blocking the substrate's test suite.
+- **Agents are measured, not tested.** `score` grades a run against a labelled corpus set
+  (`corpus/ground_truth/<target>.<class>.yaml`). Three things it must never conflate, and
+  neither may you: a case the agent *dropped* that was real (false negative), a labelled
+  site the *substrate* never offered (a substrate gap, not a model miss), and a hypothesis
+  about an *unlabelled* site (unscored, not correct). Grade on evidence facts, never on
+  the `case` string the agent wrote about itself.
+- **A name is the weakest argument, and a file or package name is not one.** Sinks match
+  on short names, so refuting on `full_name`'s package is a guess about code nobody
+  looked at. Argue from the tainted argument's resolved type, then the call-site code.
+  An unresolved type (`ANY`) is not evidence in either direction.
+- **If a caveat is derivable from the facts, the renderer owes it.** Only case-specific
+  judgement belongs to the agent. Asking the model to restate the representative-paths
+  limit produced 0 mentions across 23 findings; `render` now emits it deterministically.
+- **A prompt and a grammar that disagree fail silently.** Constrained decoding cannot
+  emit a field the schema does not declare, so an instruction to produce one is
+  unobeyable and *nothing errors*. Anything the agent prompt asks for must exist in
+  `config/schemas/<agent>.json`, and a test parses the prompt's JSON example to enforce
+  it. What the report must not omit belongs in `admit`'s required fields too: prompts
+  request, the gate enforces.
+- **A metric that cannot fail is decoration.** `score`'s `calibration` asks whether an
+  agent's confidence tracks the evidence, and `agrees: false` must be reachable. It also
+  keeps three nothings apart: constant confidence (the model expressed no opinion), a
+  signal absent from the evidence (a substrate gap), and a signal present but never
+  varying. Collapsing any of them into `0.0` reads as a measurement that was never made.
+- **Keep the null baseline runnable.** `tests/stub_runner.py` judges nothing and scores
+  0.885 precision with 0.0 confidence separation. A model that cannot beat it has added
+  nothing, and that is only visible because the floor is a thing you can execute.
 
 ---
 
@@ -152,5 +226,20 @@ Any of these means pause and raise it, don't code through it:
 - You're about to change a record schema or the log format → deliberate `v` bump + note.
 - A tool wants to make an LLM call → that belongs in an agent; keep tools deterministic.
 - A query returns empty and you're about to call it "no vuln" → disambiguate first.
+- You're about to emit a field that asserts something the substrate cannot prove
+  (`sanitized`, `exploitable`, `unsanitized_path_exists`) → it's a belief, not a fact.
+- A *belief* that would let a later run stop looking → check what tier can support it.
+  `sound` prunes, so it needs a dynamic tier for the same reason `confirmed` does: a
+  static read shows a defence *fails*, never that it holds against every input. The
+  cost of a wrong pruning verdict is a live vulnerability removed from every future
+  run, unquestioned — so make it unreachable in the grammar, not merely discouraged
+  in a prompt.
+- A model's prose and its structured fields can disagree, and only the fields are
+  checkable. Observed three times in one afternoon: a basis arguing a bug under a
+  `refuted` status, a rationale describing no sanitizer under a `sound` verdict. Where
+  the field is expensive, remove the option; where it is cheap, have the renderer flag
+  the shape deterministically. Do not settle for asking the model more firmly.
+- An agent prompt names a vuln class ("SQL", "XSS") → it belongs in the manifest
+  `narrative`; the prompt must work unchanged for the next class.
 - You're adding an abstraction "for later" → YAGNI; build the concrete phase need.
 - A fact is being asserted without a `src` → it's a hypothesis; label it.

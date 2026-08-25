@@ -1,0 +1,105 @@
+#!/usr/bin/env python3
+"""A model that isn't one — the deterministic double behind the `run_agent` seam.
+
+Reads prompt+briefing on stdin exactly as a real runner does and emits the
+dullest defensible output: one hypothesis per case, one unchanged revision per
+trace case, one finding per hypothesis — evidence copied verbatim from the
+briefing. It judges nothing.
+
+Two jobs:
+  1. the whole brief -> run_agent -> admit -> render chain is testable with zero
+     model calls, which is what keeps CLAUDE.md's "determinism first" honest;
+  2. it is the null baseline a real model has to beat. A model that produces the
+     same 26 undifferentiated `needs_proof` rows as this script has added nothing,
+     and that is only visible if the floor is something you can actually run.
+
+It deliberately emits a little prose too, because real models do, and discarding
+that is behaviour `run_agent` has to get right.
+"""
+
+import json
+import sys
+
+
+def main() -> int:
+    agent = sys.argv[1] if len(sys.argv) > 1 else "hypothesize"
+    rows = []
+    for line in sys.stdin:
+        line = line.strip()
+        if not line.startswith("{"):
+            continue
+        try:
+            rows.append(json.loads(line))
+        except ValueError:
+            continue
+
+    header = next((r for r in rows if r.get("kind") == "briefing"), {})
+    vuln_class = header.get("class", "unknown")
+    out = []
+
+    if agent == "hypothesize":
+        for case in [r for r in rows if r.get("kind") == "case"]:
+            src, snk = case["source"], case["sink"]
+            out.append({
+                "statement": f"{src['name']} reaches {snk['name']} at "
+                             f"{snk['file']}:{snk['line']}",
+                "vuln_class": vuln_class,
+                "status": "needs_proof",
+                "confidence": 0.5,
+                "evidence": case["evidence"],
+                "case": f"{snk['file']}:{snk['line']}",
+                "reasoning": "Stub runner: reported verbatim from the case evidence, "
+                             "with no judgement applied.",
+                "seed": "",
+            })
+    elif agent == "trace":
+        for case in [r for r in rows if r.get("kind") == "trace_case"]:
+            h = case["hypothesis"]
+            evidence = [e["id"] for e in case.get("evidence", []) if e.get("id")]
+            evidence += [c["id"] for c in case.get("callees", []) if c.get("id")]
+            out.append({
+                "parent": h["id"],
+                "statement": h["statement"],
+                "vuln_class": vuln_class,
+                "status": h["status"],
+                # Unchanged, deliberately. The stub reads nothing, so it has no
+                # reason to move the number — and with a `rising_confidence` spend
+                # gate that means the null baseline cannot buy itself another level.
+                # A floor that could descend for free would not be a floor.
+                "confidence": h["confidence"],
+                "evidence": sorted(set(evidence)) or ["f_missing"],
+                "basis": "Stub runner: the bodies were fetched and not read.",
+                "read": [],
+                # No verdicts: judging nothing means recording no trust decision.
+                # A belief is what a later run will not redo, so an empty one here
+                # is the honest output, not a missing feature.
+            })
+    else:
+        for row in [r for r in rows if r.get("kind") == "hypothesis"]:
+            h = row["hypothesis"]
+            refs = sorted({f"{e.get('sink_file') or e.get('file')}:"
+                           f"{e.get('sink_line') or e.get('line')}"
+                           for e in row.get("evidence", [])
+                           if e.get("sink_file") or e.get("file")})
+            out.append({
+                "hypothesis": h["id"],
+                "title": h["statement"][:120],
+                "tier": header.get("max_static_tier", "static_pattern"),
+                "severity": "medium",
+                "refs": refs or ["unknown:0"],
+                "recreation": "Stub runner: no recreation flow was reasoned about.",
+                "impact": "",
+                "caveats": "Stub runner: no caveats were reasoned about; this is the "
+                           "null baseline, not an assessment.",
+            })
+
+    print(f"Here are the {len(out)} records:")   # prose `run_agent` must discard
+    print("```json")
+    for obj in out:
+        print(json.dumps(obj, separators=(",", ":")))
+    print("```")
+    return 0
+
+
+if __name__ == "__main__":
+    sys.exit(main())

@@ -7,11 +7,20 @@ name = "source_analyst"
 version = "0.0.1"
 description = "LLM-orchestrated source review on a deterministic substrate. JSONL in, JSONL out."
 requires-python = ">=3.11"
-dependencies = []
+# Manifests are YAML because §10.1 says so; that is the only reason this list
+# is not empty. Nothing else may be added without a logged decision.
+dependencies = ["pyyaml>=6"]
 
 [project.scripts]
 cpg = "source_analyst.cpg.cli:main"
 struct_grep = "source_analyst.struct_grep.cli:main"
+manifest = "source_analyst.manifest.cli:main"
+belief = "source_analyst.belief.cli:main"
+brief = "source_analyst.lifecycle.brief:main"
+admit = "source_analyst.lifecycle.admit:main"
+render = "source_analyst.lifecycle.render:main"
+run_agent = "source_analyst.lifecycle.run_agent:main"
+score = "source_analyst.lifecycle.score:main"
 
 [tool.setuptools.packages.find]
 include = ["source_analyst*"]

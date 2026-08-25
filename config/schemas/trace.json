@@ -1,0 +1,109 @@
+{
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "records"
+  ],
+  "properties": {
+    "records": {
+      "type": "array",
+      "description": "One revised (child) hypothesis per trace_case, in the order given.",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "parent",
+          "statement",
+          "vuln_class",
+          "status",
+          "confidence",
+          "evidence",
+          "basis",
+          "read"
+        ],
+        "properties": {
+          "parent": {
+            "type": "string",
+            "maxLength": 40
+          },
+          "statement": {
+            "type": "string",
+            "maxLength": 400
+          },
+          "vuln_class": {
+            "type": "string",
+            "maxLength": 64
+          },
+          "status": {
+            "type": "string",
+            "enum": [
+              "inconclusive",
+              "investigating",
+              "needs_proof",
+              "proposed",
+              "refuted"
+            ]
+          },
+          "confidence": {
+            "type": "number",
+            "minimum": 0,
+            "maximum": 1
+          },
+          "evidence": {
+            "type": "array",
+            "items": {
+              "type": "string",
+              "maxLength": 40
+            },
+            "minItems": 1,
+            "maxItems": 64
+          },
+          "basis": {
+            "type": "string",
+            "maxLength": 1500
+          },
+          "read": {
+            "type": "array",
+            "items": {
+              "type": "string",
+              "maxLength": 400
+            },
+            "maxItems": 32
+          },
+          "verdicts": {
+            "type": "array",
+            "maxItems": 16,
+            "items": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": [
+                "subject",
+                "verdict",
+                "rationale"
+              ],
+              "properties": {
+                "subject": {
+                  "type": "string",
+                  "maxLength": 400
+                },
+                "verdict": {
+                  "type": "string",
+                  "enum": [
+                    "partial",
+                    "unknown",
+                    "unsound"
+                  ]
+                },
+                "rationale": {
+                  "type": "string",
+                  "maxLength": 1000
+                }
+              }
+            }
+          }
+        }
+      },
+      "maxItems": 64
+    }
+  }
+}

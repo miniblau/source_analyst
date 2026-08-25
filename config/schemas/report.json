@@ -1,0 +1,77 @@
+{
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "records"
+  ],
+  "properties": {
+    "records": {
+      "type": "array",
+      "description": "One finding per hypothesis in the briefing.",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "hypothesis",
+          "title",
+          "tier",
+          "severity",
+          "recreation",
+          "refs",
+          "impact",
+          "caveats"
+        ],
+        "properties": {
+          "hypothesis": {
+            "type": "string",
+            "maxLength": 40
+          },
+          "title": {
+            "type": "string",
+            "maxLength": 200
+          },
+          "tier": {
+            "type": "string",
+            "enum": [
+              "static_pattern",
+              "static_reachability",
+              "static_trace"
+            ]
+          },
+          "severity": {
+            "type": "string",
+            "enum": [
+              "info",
+              "low",
+              "medium",
+              "high",
+              "critical"
+            ]
+          },
+          "recreation": {
+            "type": "string",
+            "maxLength": 4000
+          },
+          "refs": {
+            "type": "array",
+            "items": {
+              "type": "string",
+              "maxLength": 300
+            },
+            "minItems": 1,
+            "maxItems": 32
+          },
+          "impact": {
+            "type": "string",
+            "maxLength": 1000
+          },
+          "caveats": {
+            "type": "string",
+            "maxLength": 1000
+          }
+        }
+      },
+      "maxItems": 64
+    }
+  }
+}

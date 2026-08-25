@@ -1,0 +1,13 @@
+# Language detection (design §10.2) — explicit and boring.
+#
+# A static extension map and a count. No linguist, no shell-out, no vendoring
+# heuristics. Wrong output is a one-line fix here, never a code change.
+#
+# `detect` walks a tree, counts files by extension through this map, and emits
+# {language, file_count} JSONL sorted desc. The operator reads and confirms it;
+# auto-detect-and-run is Phase 3+.
+
+java:  [.java]
+js:    [.js, .jsx, .ts, .tsx]
+swift: [.swift]
+c:     [.c, .h]

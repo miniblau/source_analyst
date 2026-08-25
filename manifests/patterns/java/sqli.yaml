@@ -1,0 +1,104 @@
+# SQLi patterns for Java (design §10.1). Data, never code — adding a sink here
+# is the whole change; no tool or agent is edited.
+#
+# Structure: named blocks whose INNER KEYS ARE QUERY PARAMETER NAMES, plus a
+# `queries` section binding each named query to the blocks it takes. The loader
+# merges the referenced blocks into a params object and knows nothing about any
+# individual query, so a new query is a new line here, not a code change.
+
+class: sqli
+language: java
+
+sources:
+  # Framework-bound controller parameters. javasrc2cpg resolves parameter
+  # annotations without the Spring jars present (verified on WebGoat: 273
+  # annotated parameters, 221 matching these names).
+  annotations:
+    - RequestParam
+    - PathVariable
+    - RequestBody
+    - RequestHeader
+    - CookieValue
+  # Explicit reads off the request. These resolve to `<unresolved>` without
+  # servlet-api on the classpath — still matched, because matching is on the
+  # short name (portable-first, §10.3), with `resolved` reported per fact.
+  calls:
+    - getParameter
+    - getParameterValues
+    - getHeader
+    - getQueryString
+    - getCookies
+    - getInputStream
+    - getReader
+
+sinks:
+  sinks:
+    - executeQuery
+    - executeUpdate
+    - execute
+    - executeLargeUpdate
+    - addBatch
+    - prepareStatement
+    - prepareCall
+    # JPA / Hibernate
+    - createQuery
+    - createNativeQuery
+    - createSQLQuery
+    # Spring JdbcTemplate — the most common Java DAO layer, and absent from
+    # the opengrep rule set until it is added there too (see `rules` below).
+    - queryForList
+    - queryForObject
+    - queryForMap
+    - queryForRowSet
+    - batchUpdate
+  # Left empty deliberately: portable-first matching (§10.3). A methodFullName
+  # filter would also drop every unresolved call, and third-party receivers
+  # (JdbcTemplate, EntityManager) are exactly the ones that go unresolved when
+  # dependency jars are absent — which is the normal state on client source.
+  #
+  # KNOWN NOISE this buys: the short names `execute`, `update` and `query` are
+  # not SQL-specific. On WebGoat, `execute` matches ProfileUploadBase.execute, a
+  # file-upload method, producing 3 non-SQL flows out of 16. Triage, don't
+  # silently filter — the reviewer needs to see why it was excluded.
+  full_name_filter: []
+  arg_index: "1"
+
+sanitizers:
+  # CANDIDATES ONLY. Presence on a path is a fact; effectiveness is a belief
+  # decided against the belief store (§4). WebGoat's SqlInjectionLesson8 escapes
+  # with replace('\'', '"') on a path that is still exploitable — a manifest
+  # that treated this list as "safe" would launder that into a false negative.
+  sanitizers:
+    - replace
+    - replaceAll
+    - escape.*
+    - encode.*
+    - sanitize.*
+    - validate.*
+    - matches
+    - quote
+    # Binding a value is the real fix, not escaping. Listed here so a bound
+    # parameter is visible on the path; `reachable` already excludes it from
+    # statement text by construction, since it taints arg_index only.
+    - setString
+    - setInt
+    - setLong
+  sanitizer_full_name_filter: []
+
+# Which named query takes which blocks. Referenced blocks are merged in order.
+queries:
+  sql_sinks:         [sinks]
+  request_sources:   [sources]
+  reachable:         [sources, sinks]
+  sanitizer_on_path: [sources, sinks, sanitizers]
+
+# struct_grep rule sets for this class+language (§10.3 rule catalog). Kept
+# separate from the blocks above because opengrep validates rule files strictly;
+# a single dual-consumer file is a decision for later, not a refactor for now.
+rules:
+  - java/sqli
+
+# Verification ceiling for THIS language (§6). Guarded: the loader rejects a
+# tier whose queries are not bound above, so this cannot claim reachability the
+# substrate cannot deliver.
+max_static_tier: static_reachability

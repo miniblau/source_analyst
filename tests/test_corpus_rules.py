@@ -14,6 +14,8 @@ import json
 import os
 import shutil
 import subprocess
+import tempfile
+import textwrap
 import sys
 import unittest
 from pathlib import Path
@@ -25,13 +27,16 @@ UPDATE = os.environ.get("UPDATE_GOLDEN") == "1"
 OPENGREP = os.environ.get("OPENGREP_BIN", "opengrep")
 
 
-def run_scan(src: Path, rules: list[str]) -> tuple[list[dict], dict]:
+def run_scan(src: Path, rules: list[str], expect_rc: int = 0) -> tuple[list[dict], dict]:
     cmd = [sys.executable, "-m", "source_analyst.struct_grep.cli", "scan", "--src", str(src)]
     for r in rules:
         cmd += ["--rules", r]
     proc = subprocess.run(cmd, cwd=ROOT, capture_output=True, text=True, timeout=1800)
-    if proc.returncode != 0:
-        raise AssertionError(f"struct_grep scan failed:\n{proc.stderr}")
+    # rc 2 = the scan ran but is not trustworthy (nothing scanned, rules
+    # skipped, parse errors). Callers that want that state ask for it.
+    if proc.returncode != expect_rc:
+        raise AssertionError(
+            f"struct_grep scan rc={proc.returncode} (wanted {expect_rc}):\n{proc.stderr}")
     facts = [json.loads(line) for line in proc.stdout.splitlines()]
     meta = json.loads(proc.stderr.strip().splitlines()[-1])
     return facts, meta
@@ -140,15 +145,19 @@ class TestGoldenRules(unittest.TestCase):
         many files and zero parse errors. Reporting "no vuln" without reading
         these two numbers is the mistake this test exists to prevent.
         """
-        facts, meta = run_scan(ROOT / "rules", ["java/sqli"])
+        # ...and the exit status says so too, so a caller that reads nothing
+        # but the return code still cannot mistake this for a clean tree.
+        facts, meta = run_scan(ROOT / "rules", ["java/sqli"], expect_rc=2)
         self.assertEqual(facts, [])
         self.assertEqual(meta["scan_meta"]["files_scanned"], 0,
                          "no Java in rules/ — nothing was analysed")
+        self.assertFalse(meta["scan_meta"]["trustworthy"])
 
         src = ROOT / FIXTURES["java_sqli_min"]["path"]
         _, real = run_scan(src, ["java/sqli"])
         self.assertGreater(real["scan_meta"]["files_scanned"], 0)
         self.assertEqual(real["scan_meta"]["parse_errors"], 0)
+        self.assertTrue(real["scan_meta"]["trustworthy"])
 
     def test_line_refs_point_at_real_source(self):
         """A file:line a reviewer cannot open is worse than no reference."""
@@ -165,6 +174,66 @@ class TestGoldenRules(unittest.TestCase):
 
 
 @unittest.skipUnless(shutil.which(OPENGREP), "opengrep not installed")
+class TestUntrustworthyScan(unittest.TestCase):
+    """A scan that could not do its job must not exit 0.
+
+    Verified failure this guards: one bad rule in a file aborts the whole
+    opengrep run — files_scanned 0, parse_errors 1, zero facts — and the tool
+    previously returned 0, so a caller checking exit status read it as a clean
+    tree. Zero facts is only evidence of absence when the scan was sound.
+    """
+
+    @unittest.skipUnless(shutil.which(OPENGREP), "opengrep not installed")
+    def test_broken_rule_file_does_not_exit_clean(self):
+        broken = ROOT / "rules" / "java" / "zz_test_broken.yaml"
+        broken.write_text(textwrap.dedent("""
+            rules:
+              - id: java_zz_ok
+                languages: [java]
+                severity: INFO
+                message: ok
+                metadata: {vuln_class: sqli, kind: sink_candidate}
+                patterns:
+                  - pattern: $R.executeQuery(...)
+              - id: java_zz_bad
+                languages: [notalanguage]
+                severity: INFO
+                message: bad
+                metadata: {vuln_class: sqli, kind: sink_candidate}
+                patterns:
+                  - pattern: $R.foo(...)
+        """).lstrip())
+        try:
+            proc = subprocess.run(
+                [sys.executable, "-m", "source_analyst.struct_grep.cli", "scan",
+                 "--src", str(ROOT / "corpus" / "fixtures" / "java_sqli_min"),
+                 "--rules", "java/zz_test_broken"],
+                cwd=ROOT, capture_output=True, text=True, timeout=600)
+        finally:
+            broken.unlink(missing_ok=True)
+
+        self.assertEqual(proc.stdout.strip(), "", "a failed scan must emit no facts")
+        self.assertNotEqual(proc.returncode, 0,
+                            "a scan that parsed nothing must not report success")
+        meta = json.loads(
+            [l for l in proc.stderr.splitlines() if l.startswith("{")][-1])
+        self.assertFalse(meta["scan_meta"]["trustworthy"])
+        self.assertIn("not trustworthy", proc.stderr)
+
+    @unittest.skipUnless(shutil.which(OPENGREP), "opengrep not installed")
+    def test_scanning_no_files_is_not_a_clean_result(self):
+        """A Java rule set over a tree with no Java is zero facts for a reason
+        that has nothing to do with the code being safe."""
+        with tempfile.TemporaryDirectory() as d:
+            (Path(d) / "notes.md").write_text("no source here\n")
+            proc = subprocess.run(
+                [sys.executable, "-m", "source_analyst.struct_grep.cli", "scan",
+                 "--src", d, "--rules", "java/sqli"],
+                cwd=ROOT, capture_output=True, text=True, timeout=600)
+        self.assertNotEqual(proc.returncode, 0)
+        self.assertIn("no files were scanned", proc.stderr)
+
+
 class TestVocabulary(unittest.TestCase):
     def test_rule_sets_are_listed(self):
         from source_analyst.struct_grep import rules
