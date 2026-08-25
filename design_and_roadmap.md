@@ -692,6 +692,41 @@ the gates *discriminate*, or whether they rubber-stamp whatever arrives.
 | Qwen2.5-0.5B-Instruct Q4_K_M | **Could not produce an admissible batch.** Four cases in, one record out; the three missing cases silently unjudged. Also wrote the class's human title where its identifier belongs. |
 | Qwen3.8-27B dense Q4_K_XL | **Not obtained.** Measured at 1.36 tok/s generation on this box (16.7GB of weights against ~25GB/s of memory bandwidth, and it pushed 8GB into swap): 24 minutes for the first of seven batches, ~5h for the pass. Stopped in favour of exercising the trace loop against a real model. The number is recorded because it is the reason, not an excuse — a dense 27B is not a model this hardware can run a review with. |
 
+**gemma-4-26B-A4B-it Q5_K_XL, 2026-08-25.** The second judgement scorecard, finally
+obtained — another MoE, so another model this hardware can actually run. Same 348-fact
+substrate, same leg.
+
+| | Gemma 4 26B-A4B | Qwen3-Coder 30B-A3B |
+|---|---|---|
+| scored / TP / TN / FP / FN | 26 / 23 / 3 / 0 / 0 | 26 / 23 / 3 / 0 / 0 |
+| precision · recall · site_recall | 1.0 · 1.0 · 1.0 | 1.0 · 1.0 · 1.0 |
+| confidence spread · stdev | 0.40 · 0.127 | 0.35 · 0.106 |
+| rho sanitizer_candidates | **-0.929** | -0.335 |
+| rho path_length | **-0.766** | -0.328 |
+| rho methods_crossed | **-0.892** | -0.425 |
+
+The binary metrics saturate — this corpus cannot separate two competent models there,
+which is the whole reason `calibration` exists. On that axis Gemma's confidence tracks
+the evidence two to three times more tightly.
+
+Two operational findings, both of which would have been misread as judgement:
+
+  * **Gemma is a reasoning model.** Its output goes to `reasoning_content` and
+    `content` stays empty until thinking ends, so `tools/openai_chat.py` — which reads
+    `content` — saw nothing at all. Needs `--reasoning-budget 0` on the server; the
+    per-request field is ignored. A run without it scores zero and looks like a model
+    that cannot judge.
+  * **Its batch capacity is one case.** At four it reliably returned one record for
+    four cases; at two it was intermittent. Qwen handles four. The short-count gate
+    caught every instance and admitted nothing, so the cost was wall-clock, not
+    silence — but it means ~26 batches instead of 7 (about 70s each, so roughly 30
+    minutes against Qwen's 19).
+
+Treat this as suggestive, not decisive: one run each, one leg, one class, and no
+variance measured. It is also exactly the kind of single-corpus signal §9 says not to
+tune on. What it does justify is testing Gemma on the `trace` leg, where every
+judgement failure so far has occurred.
+
 The 0.5B is the informative row. It failed in two ways that the system had no gate
 for, and both were the *same* failure the 30B had made in a milder form:
 
