@@ -22,7 +22,11 @@ import io.shiftleft.codepropertygraph.generated.nodes
 val sinks = strList("sinks")
 if (sinks.isEmpty) throw new IllegalArgumentException("sql_sinks: param `sinks` is required")
 val fullNameFilter = strList("full_name_filter")
-val argIndex = str("arg_index", "1").toInt
+// Comma-separated positions, as in reachable.sc. The inventory emits one record per
+// (call, position) so a class that taints several arguments can still say which of
+// them is a runtime value — with a single value, one record per call as before.
+val argIndices: List[Int] =
+  str("arg_index", "1").split(",").map(_.trim).filter(_.nonEmpty).map(_.toInt).toList
 
 def typeOf(n: nodes.AstNode): String = n match {
   case x: nodes.Identifier      => x.typeFullName
@@ -39,7 +43,7 @@ val selected =
   if (fullNameFilter.isEmpty) allMatches
   else allMatches.filter(c => fullNameFilter.exists(p => c.methodFullName.matches(p)))
 
-val rows = selected.map { c =>
+val rows = selected.flatMap { c => argIndices.map { argIndex =>
   val arg = c.argument.find(_.argumentIndex == argIndex)
   val recv = c.receiver.headOption
   ujson.Obj(
@@ -58,7 +62,7 @@ val rows = selected.map { c =>
     "arg_is_literal"   -> arg.exists(_.isInstanceOf[nodes.Literal]),
     "arg_present"      -> arg.isDefined
   )
-}
+}}
 
 emit(
   rows,

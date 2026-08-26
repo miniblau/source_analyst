@@ -42,6 +42,22 @@ def strip_ts(facts: list[dict]) -> list[dict]:
 
 
 @unittest.skipUnless(shutil.which(os.environ.get("JOERN_BIN", "joern")), "joern not installed")
+def manifest_params(vuln_class: str, lang: str, query: str) -> dict:
+    """Params from the LIVE manifest, not the snapshot in fixtures.json.
+
+    fixtures.json stores a copy taken when a fixture was registered, so a manifest
+    change is invisible to the golden tests until someone resyncs it — which is how
+    a widening of path_traversal went entirely untested. Coverage assertions must
+    read what the manifest says today.
+    """
+    out = subprocess.run(
+        [sys.executable, "-m", "source_analyst.manifest.cli", "params",
+         "--class", vuln_class, "--lang", lang, "--query", query],
+        capture_output=True, text=True)
+    assert out.returncode == 0, out.stderr
+    return json.loads(out.stdout)
+
+
 class TestGolden(unittest.TestCase):
     def _check(self, name: str, query: str):
         fx = FIXTURES[name]
@@ -231,18 +247,25 @@ class TestGolden(unittest.TestCase):
         for flow in facts:
             self.assertEqual(flow["kind"], "flow")
             self.assertEqual(flow["source_marker"], "RequestParam")
-            self.assertEqual(flow["sink_name"], "createNewFile")
-            # THE shape assertion: argument 0 is the receiver. A regression that
-            # quietly moved this to 1 would empty the class without failing
-            # anything else, and an empty class reads as a clean one.
-            self.assertEqual(flow["sink_arg_index"], 0)
-            self.assertGreater(flow["crosses_methods"], 1, "should cross a method boundary")
             self.assertTrue(flow["steps"])
+
+        # THE shape assertion, and it is about BREADTH. This test used to require
+        # every flow to be `createNewFile` at argument 0, which was the assertion
+        # encoding the same corpus-shaped assumption the class had: one sink shape,
+        # the receiver, because that is what WebGoat's lesson uses. A class pinned
+        # that way cannot see `new File(dir, name)` or any static path API, and
+        # nothing failed to say so. Both shapes must now appear.
+        shapes = {(f["sink_name"], f["sink_arg_index"]) for f in facts}
+        self.assertIn(("createNewFile", 0), shapes,
+                      "receiver-tainted file operation went missing")
+        self.assertIn(("<init>", 2), shapes,
+                      "taint into the second constructor argument went missing — "
+                      "this is the `new File(dir, name)` shape")
 
         # negatives were in scope and simply did not connect
         self.assertGreater(qm["source_nodes"], 2)
         self.assertGreaterEqual(qm["sink_arg_nodes"], 1)
-        self.assertEqual(qm["pairs"], 2)
+        self.assertGreaterEqual(qm["pairs"], 2)
 
         # the literal-filename and sink-less controls stay dark
         subjects = " ".join(f["subject"] for f in facts)
@@ -310,6 +333,46 @@ class TestGolden(unittest.TestCase):
 
         # the literal view name is not a flow at all
         self.assertNotIn("home", " ".join(f["subject"] for f in facts))
+
+    def test_ordinary_idioms_no_corpus_exercises(self):
+        """The guard against a class being shaped by the one app we validate on.
+
+        WebGoat is small, deliberately vulnerable and idiosyncratic. A class fitted
+        to it can score 1.0 on precision and recall and still be blind to the forms
+        most client code actually uses — measured, not feared: with path_traversal
+        pinned to the receiver (WebGoat's shape) this fixture's
+        `Files.readAllBytes` produced ZERO flows while every WebGoat metric read
+        1.0. Worse, the same narrowness hid ProfileZipSlip, a path-traversal lesson
+        in WebGoat ITSELF, and ground truth could not show it because ground truth
+        is scoped to what the substrate already found.
+
+        So each class must find its idiom here. Adding a sink name is cheap;
+        proving the name matches something is what this test is for.
+        """
+        fx = FIXTURES["java_typical_idioms"]
+        src = ROOT / fx["path"]
+        if not src.is_dir():
+            self.skipTest("typical-idioms fixture not present")
+
+        # Keyed on (sink, ARGUMENT POSITION), not the sink name alone. Name-only was
+        # not a guard: `Files.readAllBytes` also yields a flow at argument 0, whose
+        # `sink_arg_code` is the bare class reference `Files`, so re-pinning the class
+        # to the receiver still "reached readAllBytes" and the test passed while the
+        # real coverage was gone. The position is the thing that was blind.
+        wanted = {
+            "sqli": {("queryForList", 1), ("createQuery", 1)},   # JdbcTemplate, JPA
+            "path_traversal": {("readAllBytes", 1)},             # static NIO path arg
+            "open_redirect": {("sendRedirect", 1)},              # the servlet form
+        }
+        for vuln_class, expect in wanted.items():
+            params = manifest_params(vuln_class, "java", "reachable")
+            facts, meta = run_query(src, "reachable", params, fx["lang"])
+            self.assertTrue(meta["query_meta"]["dataflow_overlay"])
+            got = {(f["sink_name"], f["sink_arg_index"]) for f in facts}
+            self.assertTrue(
+                expect <= got,
+                f"{vuln_class} lost coverage of {sorted(expect - got)} — a shape no "
+                f"WebGoat run exercises. Reached: {sorted(got)}")
 
     def test_sanitizer_facts_join_with_reachable(self):
         """Both queries must agree on the (source, sink) pairs they describe."""

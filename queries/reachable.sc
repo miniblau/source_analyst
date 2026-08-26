@@ -15,7 +15,8 @@
 // params (sinks):
 //   sinks            [string] required — sink short-name regexes
 //   full_name_filter [string] optional — regexes over methodFullName
-//   arg_index        string   optional — sink argument to taint-check (default "1")
+//   arg_index        string   optional — sink argument position(s) to taint-check,
+//                             comma-separated for several ("0,1,2"); default "1"
 //   max_paths        string   optional — cap on emitted facts (default "500")
 //
 // emits kind=flow, one fact per distinct (source, sink) pair carrying the
@@ -29,7 +30,15 @@ val calls = strList("calls")
 val receivers = strList("receivers")
 val sinks = strList("sinks")
 val fullNameFilter = strList("full_name_filter")
-val argIndex = str("arg_index", "1").toInt
+// A class may bind SEVERAL argument positions, comma-separated ("0,1,2"). One
+// position per class is a corpus artefact: path_traversal was pinned to 0 because
+// WebGoat's lesson taints a File RECEIVER, which made every static path API
+// (`Files.readAllBytes(p)`, taint at 1) invisible to it — measured, on a fixture of
+// ordinary idioms, as a whole class of real bugs the query could see and the
+// manifest could not ask for. A single value still means exactly what it did, so
+// nothing that bound "1" changes.
+val argIndices: List[Int] =
+  str("arg_index", "1").split(",").map(_.trim).filter(_.nonEmpty).map(_.toInt).toList
 val maxPaths = str("max_paths", "500").toInt
 
 if (annotations.isEmpty && calls.isEmpty)
@@ -88,8 +97,15 @@ val selectedSinks =
   else sinkCalls.filter(c => fullNameFilter.exists(p => c.methodFullName.matches(p)))
 // The sink node for dataflow is the ARGUMENT, not the call: we are asking
 // whether tainted data lands in the statement text, not whether the call runs.
+// Each (call, position) pair is its own sink: taint into argument 1 and taint into
+// argument 2 of the same call are different facts about different values. The index
+// is carried alongside so each flow can report the position it actually landed in,
+// which keeps `sink_arg_index` a single number and the record schema untouched.
+val sinkArgPairs =
+  selectedSinks.flatMap(c => argIndices.flatMap(i => c.argument.find(_.argumentIndex == i).map(a => (a, i))))
+val argIndexOf: Map[Long, Int] = sinkArgPairs.map { case (a, i) => (a.id, i) }.toMap
 val sinkArgs: List[nodes.CfgNode] =
-  selectedSinks.flatMap(_.argument.find(_.argumentIndex == argIndex)).collectAll[nodes.CfgNode].l
+  sinkArgPairs.map(_._1).collectAll[nodes.CfgNode].l
 
 // ------------------------------------------------------------------ dataflow
 
@@ -162,7 +178,7 @@ val rows = grouped.toList.flatMap { case (_, entries) =>
     "sink_arg_code"   -> clip(sinkNode.code, 200),
     "sink_arg_type"          -> typeOf(sinkNode),
     "sink_arg_type_resolved" -> typeResolved(typeOf(sinkNode)),
-    "sink_arg_index"  -> argIndex,
+    "sink_arg_index"  -> argIndexOf.getOrElse(sinkNode.id, -1),
     // Anchor on the CALL, not the tainted argument. On a multi-line call the
     // two differ (WebGoat Servers.java: call at 50, argument at 51), and
     // sql_sinks anchors on the call — facts from the two queries have to join
@@ -195,7 +211,7 @@ emit(
     "annotations"      -> ujson.Arr(annotations.map(ujson.Str(_))*),
     "calls"            -> ujson.Arr(calls.map(ujson.Str(_))*),
     "sinks"            -> ujson.Arr(sinks.map(ujson.Str(_))*),
-    "arg_index"        -> argIndex,
+    "arg_index"        -> argIndices.mkString(","),
     // Disambiguation (playbook: an empty result is ambiguous). Zero flows with
     // zero sources, or zero sinks, or no overlay, are four different claims.
     "dataflow_overlay" -> hasDataflow,

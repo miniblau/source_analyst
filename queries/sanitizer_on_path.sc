@@ -28,7 +28,8 @@
 // params (sinks):
 //   sinks            [string] required — sink short-name regexes
 //   full_name_filter [string] optional — regexes over methodFullName
-//   arg_index        string   optional — sink argument to taint-check (default "1")
+//   arg_index        string   optional — sink argument position(s) to taint-check,
+//                             comma-separated for several ("0,1,2"); default "1"
 // params (sanitizers):
 //   sanitizers       [string] required — regexes over call short names on the path
 //   sanitizer_full_name_filter [string] optional — regexes over methodFullName
@@ -47,7 +48,10 @@ val sinks = strList("sinks")
 val fullNameFilter = strList("full_name_filter")
 val sanitizers = strList("sanitizers")
 val sanitizerFilter = strList("sanitizer_full_name_filter")
-val argIndex = str("arg_index", "1").toInt
+// Comma-separated positions, as in reachable.sc — the two queries must select the
+// same sink arguments or their facts stop joining on (file, line).
+val argIndices: List[Int] =
+  str("arg_index", "1").split(",").map(_.trim).filter(_.nonEmpty).map(_.toInt).toList
 val maxPaths = str("max_paths", "500").toInt
 
 if (annotations.isEmpty && calls.isEmpty)
@@ -89,8 +93,11 @@ val sinkCalls = cpg.call.name(sinks*).l
 val selectedSinks =
   if (fullNameFilter.isEmpty) sinkCalls
   else sinkCalls.filter(c => fullNameFilter.exists(p => c.methodFullName.matches(p)))
+val sinkArgPairs =
+  selectedSinks.flatMap(c => argIndices.flatMap(i => c.argument.find(_.argumentIndex == i).map(a => (a, i))))
+val argIndexOf: Map[Long, Int] = sinkArgPairs.map { case (a, i) => (a.id, i) }.toMap
 val sinkArgs: List[nodes.CfgNode] =
-  selectedSinks.flatMap(_.argument.find(_.argumentIndex == argIndex)).collectAll[nodes.CfgNode].l
+  sinkArgPairs.map(_._1).collectAll[nodes.CfgNode].l
 
 val overlays = cpg.metaData.overlays.l
 val hasDataflow = overlays.contains("dataflowOss")
@@ -177,7 +184,7 @@ val rows = grouped.toList.map { case (_, entries) =>
                                    .getOrElse(sinkNode.location.filename),
     "sink_line"               -> inCallOf(sinkNode).flatMap(_.lineNumber.map(_.toInt))
                                    .getOrElse(sinkNode.lineNumber.map(_.toInt).getOrElse(-1)),
-    "sink_arg_index"          -> argIndex,
+    "sink_arg_index"          -> argIndexOf.getOrElse(sinkNode.id, -1),
     // Counts over the paths the ENGINE REPORTED, not over all routes in the
     // program — see the header. A reader must be able to tell these apart, so
     // the field names say `reported_`.
@@ -199,7 +206,7 @@ emit(
   ujson.Obj(
     "sinks"             -> ujson.Arr(sinks.map(ujson.Str(_))*),
     "sanitizers"        -> ujson.Arr(sanitizers.map(ujson.Str(_))*),
-    "arg_index"         -> argIndex,
+    "arg_index"         -> argIndices.mkString(","),
     "dataflow_overlay"  -> hasDataflow,
     "source_nodes"      -> sourceNodes.size,
     "sink_arg_nodes"    -> sinkArgs.size,

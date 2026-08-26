@@ -299,10 +299,31 @@
             "canWrite",
             "setReadable",
             "setWritable",
-            "transferTo"
+            "transferTo",
+            "readAllBytes",
+            "readAllLines",
+            "readString",
+            "newInputStream",
+            "newOutputStream",
+            "newBufferedReader",
+            "newBufferedWriter",
+            "copy",
+            "move",
+            "walk",
+            "createDirectories",
+            "createFile",
+            "deleteIfExists",
+            "<init>"
           ],
-          "full_name_filter": [],
-          "arg_index": "0"
+          "full_name_filter": [
+            "^java\\.io\\.File\\.<init>.*",
+            "^java\\.io\\.File(Input|Output)Stream\\.<init>.*",
+            "^java\\.io\\.RandomAccessFile\\.<init>.*",
+            "^java\\.util\\.zip\\.ZipFile\\.<init>.*",
+            ".*\\.(createNewFile|mkdir|mkdirs|delete|deleteOnExit|renameTo|listFiles|exists|isFile|isDirectory|canRead|canWrite|setReadable|setWritable|transferTo)\\b.*",
+            "^java\\.nio\\.file\\.(Files|Paths|Path)\\..*"
+          ],
+          "arg_index": "0,1,2"
         }
       },
       "sanitizer_on_path": {
@@ -338,10 +359,31 @@
             "canWrite",
             "setReadable",
             "setWritable",
-            "transferTo"
+            "transferTo",
+            "readAllBytes",
+            "readAllLines",
+            "readString",
+            "newInputStream",
+            "newOutputStream",
+            "newBufferedReader",
+            "newBufferedWriter",
+            "copy",
+            "move",
+            "walk",
+            "createDirectories",
+            "createFile",
+            "deleteIfExists",
+            "<init>"
           ],
-          "full_name_filter": [],
-          "arg_index": "0",
+          "full_name_filter": [
+            "^java\\.io\\.File\\.<init>.*",
+            "^java\\.io\\.File(Input|Output)Stream\\.<init>.*",
+            "^java\\.io\\.RandomAccessFile\\.<init>.*",
+            "^java\\.util\\.zip\\.ZipFile\\.<init>.*",
+            ".*\\.(createNewFile|mkdir|mkdirs|delete|deleteOnExit|renameTo|listFiles|exists|isFile|isDirectory|canRead|canWrite|setReadable|setWritable|transferTo)\\b.*",
+            "^java\\.nio\\.file\\.(Files|Paths|Path)\\..*"
+          ],
+          "arg_index": "0,1,2",
           "sanitizers": [
             "getCanonicalPath",
             "getCanonicalFile",
@@ -448,6 +490,52 @@
             "isValid.*"
           ],
           "sanitizer_full_name_filter": []
+        }
+      }
+    }
+  },
+  "java_typical_idioms": {
+    "path": "corpus/fixtures/java_typical_idioms",
+    "lang": "JAVASRC",
+    "note": "ordinary Java idioms that appear nowhere in WebGoat \u2014 JdbcTemplate, JPA, static NIO paths, servlet sendRedirect. Guards the manifest vocabulary that no corpus run exercises, which is most of it.",
+    "queries": {
+      "reachable": {
+        "params": {
+          "annotations": [
+            "RequestParam",
+            "PathVariable",
+            "RequestBody",
+            "RequestHeader",
+            "CookieValue"
+          ],
+          "calls": [
+            "getParameter",
+            "getParameterValues",
+            "getHeader",
+            "getQueryString",
+            "getCookies",
+            "getInputStream",
+            "getReader"
+          ],
+          "sinks": [
+            "executeQuery",
+            "executeUpdate",
+            "execute",
+            "executeLargeUpdate",
+            "addBatch",
+            "prepareStatement",
+            "prepareCall",
+            "createQuery",
+            "createNativeQuery",
+            "createSQLQuery",
+            "queryForList",
+            "queryForObject",
+            "queryForMap",
+            "queryForRowSet",
+            "batchUpdate"
+          ],
+          "full_name_filter": [],
+          "arg_index": "1"
         }
       }
     }
