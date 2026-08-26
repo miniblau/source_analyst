@@ -54,6 +54,13 @@ def prelude(out_file: Path, params: dict) -> str:
     quotes, backslashes, triple-quotes — can break out into the Scala source."""
     blob = base64.b64encode(json.dumps(params).encode()).decode()
     return f'''// --- injected by tools/cpg (do not edit in query files) ---
+// Joern's REPL usually has these in scope ambiently, and a query that relies on
+// that is a query that compiles on some CPGs and not others. Observed on the Juice
+// Shop frontend: `typeFullName` on a Call resolved on the WebGoat and small-JS
+// trees and failed with E008 here, for the same script — the accessors a REPL
+// brings depend on what it has loaded. Importing them explicitly makes a query
+// mean the same thing everywhere, and a duplicate import costs nothing.
+import io.shiftleft.semanticcpg.language.*
 val outFile: String = {json.dumps(str(out_file))}
 val paramsJson: String = new String(
   java.util.Base64.getDecoder.decode("{blob}"), java.nio.charset.StandardCharsets.UTF_8)
