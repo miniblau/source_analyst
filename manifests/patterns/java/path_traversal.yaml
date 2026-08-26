@@ -52,69 +52,72 @@ sources:
     - getReader
 
 sinks:
-  # Filesystem ACCESS on a tainted receiver — the point where a chosen path
-  # actually touches the disk. Path *manipulation* (getCanonicalPath, toPath,
-  # getParentFile) is deliberately NOT here: in WebGoat those calls are the
-  # defence, not the bug, so they are sanitizer candidates below.
-  sinks:
-    - createNewFile
-    - mkdir
-    - mkdirs
-    - delete
-    - deleteOnExit
-    - renameTo
-    - listFiles
-    - exists
-    - isFile
-    - isDirectory
-    - canRead
-    - canWrite
-    - setReadable
-    - setWritable
-    - transferTo
-    # Static path APIs — taint at argument 1. None of these occurs in WebGoat, and
-    # that is exactly the point: they are the common form in modern Java, so the
-    # corpus has no example of the shape most client code will actually use.
-    - readAllBytes
-    - readAllLines
-    - readString
-    - newInputStream
-    - newOutputStream
-    - newBufferedReader
-    - newBufferedWriter
-    - copy
-    - move
-    - walk
-    - createDirectories
-    - createFile
-    - deleteIfExists
-    # Path construction. The bare name carries nothing — every constructor in the
-    # tree is `<init>` (490 of them on WebGoat) — so this one needs the filter below.
-    - <init>
+  # THREE SHAPES, each probed only where its taint actually lands. A single list of
+  # positions for the whole class fixed the blindness but asked every sink about
+  # every position — a static call about its receiver, a constructor about the
+  # object being built. Groups keep the coverage and drop the nonsense.
+  sink_groups:
+    # 1. Filesystem access on a tainted RECEIVER. `file.createNewFile()` carries no
+    #    argument at all; the path lives in the object the call is made on, which
+    #    Joern indexes as argument 0.
+    - sinks:
+        - createNewFile
+        - mkdir
+        - mkdirs
+        - delete
+        - deleteOnExit
+        - renameTo
+        - listFiles
+        - exists
+        - isFile
+        - isDirectory
+        - canRead
+        - canWrite
+        - setReadable
+        - setWritable
+        - transferTo
+      full_name_filter: []
+      arg_index: "0"
+
+    # 2. Static path APIs — the path is an ARGUMENT. None of these occurs anywhere
+    #    in WebGoat, which is the point: they are the common form in modern Java, so
+    #    the corpus has no example of the shape most client code will use.
+    - sinks:
+        - readAllBytes
+        - readAllLines
+        - readString
+        - newInputStream
+        - newOutputStream
+        - newBufferedReader
+        - newBufferedWriter
+        - copy
+        - move
+        - walk
+        - createDirectories
+        - createFile
+        - deleteIfExists
+      full_name_filter:
+        - "^java\\.nio\\.file\\.(Files|Paths|Path)\\..*"
+      arg_index: "1,2"
+
+    # 3. Path CONSTRUCTION. Every constructor in the tree is called `<init>` (490 of
+    #    them on WebGoat), so the bare name carries nothing and the filter is what
+    #    makes this nameable at all. Argument 1 is `new File(userPath)`; argument 2
+    #    is `new File(dir, name)`, which is WebGoat's own ProfileUploadBase:51.
+    - sinks:
+        - <init>
+      full_name_filter:
+        - "^java\\.io\\.File\\.<init>.*"
+        - "^java\\.io\\.File(Input|Output)Stream\\.<init>.*"
+        - "^java\\.io\\.RandomAccessFile\\.<init>.*"
+        - "^java\\.util\\.zip\\.ZipFile\\.<init>.*"
+      arg_index: "1,2"
+
   # MEASURED NOISE, excluded rather than filtered. On WebGoat at arg 0:
   #   `length`  25 hits, 23 of them java.lang.String.length  — 8% precision
   #   `list`     1 hit,  java.util.Collections.list          — 0% precision
   # Both are legitimate java.io.File methods and both are useless as short-name
-  # sinks. They belong here only behind a full_name_filter, and a filter is a
-  # whitelist over EVERY sink in the set (sql_sinks.sc:40), so adding one for
-  # their sake would silently drop every unresolved hit for all the others.
-  # Dropping two low-value sinks is the cheaper honest trade.
-  #
-  # Left empty for the same reason as sqli: portable-first matching (§10.3).
-  # The names kept above measured clean on the corpus — `exists` 6/6 File,
-  # `toPath` 11/11 File — so there is nothing yet for a filter to fix.
-  # Needed only to make `<init>` nameable. A filter is a WHITELIST over every sink
-  # in the set (sql_sinks.sc), so each name kept above needs an entry here too or it
-  # would be dropped along with the constructors — including the unresolved ones,
-  # which on client source without dependency jars is most of them.
-  full_name_filter:
-    - "^java\\.io\\.File\\.<init>.*"
-    - "^java\\.io\\.File(Input|Output)Stream\\.<init>.*"
-    - "^java\\.io\\.RandomAccessFile\\.<init>.*"
-    - "^java\\.util\\.zip\\.ZipFile\\.<init>.*"
-    - ".*\\.(createNewFile|mkdir|mkdirs|delete|deleteOnExit|renameTo|listFiles|exists|isFile|isDirectory|canRead|canWrite|setReadable|setWritable|transferTo)\\b.*"
-    - "^java\\.nio\\.file\\.(Files|Paths|Path)\\..*"
-  arg_index: "0,1,2"
+  # sinks; a filter for their sake would drop every unresolved hit for the others.
 
 sanitizers:
   # CANDIDATES ONLY. Presence on a path is a fact; effectiveness is a belief

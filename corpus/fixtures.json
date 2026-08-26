@@ -284,46 +284,62 @@
             "getInputStream",
             "getReader"
           ],
-          "sinks": [
-            "createNewFile",
-            "mkdir",
-            "mkdirs",
-            "delete",
-            "deleteOnExit",
-            "renameTo",
-            "listFiles",
-            "exists",
-            "isFile",
-            "isDirectory",
-            "canRead",
-            "canWrite",
-            "setReadable",
-            "setWritable",
-            "transferTo",
-            "readAllBytes",
-            "readAllLines",
-            "readString",
-            "newInputStream",
-            "newOutputStream",
-            "newBufferedReader",
-            "newBufferedWriter",
-            "copy",
-            "move",
-            "walk",
-            "createDirectories",
-            "createFile",
-            "deleteIfExists",
-            "<init>"
-          ],
-          "full_name_filter": [
-            "^java\\.io\\.File\\.<init>.*",
-            "^java\\.io\\.File(Input|Output)Stream\\.<init>.*",
-            "^java\\.io\\.RandomAccessFile\\.<init>.*",
-            "^java\\.util\\.zip\\.ZipFile\\.<init>.*",
-            ".*\\.(createNewFile|mkdir|mkdirs|delete|deleteOnExit|renameTo|listFiles|exists|isFile|isDirectory|canRead|canWrite|setReadable|setWritable|transferTo)\\b.*",
-            "^java\\.nio\\.file\\.(Files|Paths|Path)\\..*"
-          ],
-          "arg_index": "0,1,2"
+          "sink_groups": [
+            {
+              "sinks": [
+                "createNewFile",
+                "mkdir",
+                "mkdirs",
+                "delete",
+                "deleteOnExit",
+                "renameTo",
+                "listFiles",
+                "exists",
+                "isFile",
+                "isDirectory",
+                "canRead",
+                "canWrite",
+                "setReadable",
+                "setWritable",
+                "transferTo"
+              ],
+              "full_name_filter": [],
+              "arg_index": "0"
+            },
+            {
+              "sinks": [
+                "readAllBytes",
+                "readAllLines",
+                "readString",
+                "newInputStream",
+                "newOutputStream",
+                "newBufferedReader",
+                "newBufferedWriter",
+                "copy",
+                "move",
+                "walk",
+                "createDirectories",
+                "createFile",
+                "deleteIfExists"
+              ],
+              "full_name_filter": [
+                "^java\\.nio\\.file\\.(Files|Paths|Path)\\..*"
+              ],
+              "arg_index": "1,2"
+            },
+            {
+              "sinks": [
+                "<init>"
+              ],
+              "full_name_filter": [
+                "^java\\.io\\.File\\.<init>.*",
+                "^java\\.io\\.File(Input|Output)Stream\\.<init>.*",
+                "^java\\.io\\.RandomAccessFile\\.<init>.*",
+                "^java\\.util\\.zip\\.ZipFile\\.<init>.*"
+              ],
+              "arg_index": "1,2"
+            }
+          ]
         }
       },
       "sanitizer_on_path": {
@@ -344,46 +360,62 @@
             "getInputStream",
             "getReader"
           ],
-          "sinks": [
-            "createNewFile",
-            "mkdir",
-            "mkdirs",
-            "delete",
-            "deleteOnExit",
-            "renameTo",
-            "listFiles",
-            "exists",
-            "isFile",
-            "isDirectory",
-            "canRead",
-            "canWrite",
-            "setReadable",
-            "setWritable",
-            "transferTo",
-            "readAllBytes",
-            "readAllLines",
-            "readString",
-            "newInputStream",
-            "newOutputStream",
-            "newBufferedReader",
-            "newBufferedWriter",
-            "copy",
-            "move",
-            "walk",
-            "createDirectories",
-            "createFile",
-            "deleteIfExists",
-            "<init>"
+          "sink_groups": [
+            {
+              "sinks": [
+                "createNewFile",
+                "mkdir",
+                "mkdirs",
+                "delete",
+                "deleteOnExit",
+                "renameTo",
+                "listFiles",
+                "exists",
+                "isFile",
+                "isDirectory",
+                "canRead",
+                "canWrite",
+                "setReadable",
+                "setWritable",
+                "transferTo"
+              ],
+              "full_name_filter": [],
+              "arg_index": "0"
+            },
+            {
+              "sinks": [
+                "readAllBytes",
+                "readAllLines",
+                "readString",
+                "newInputStream",
+                "newOutputStream",
+                "newBufferedReader",
+                "newBufferedWriter",
+                "copy",
+                "move",
+                "walk",
+                "createDirectories",
+                "createFile",
+                "deleteIfExists"
+              ],
+              "full_name_filter": [
+                "^java\\.nio\\.file\\.(Files|Paths|Path)\\..*"
+              ],
+              "arg_index": "1,2"
+            },
+            {
+              "sinks": [
+                "<init>"
+              ],
+              "full_name_filter": [
+                "^java\\.io\\.File\\.<init>.*",
+                "^java\\.io\\.File(Input|Output)Stream\\.<init>.*",
+                "^java\\.io\\.RandomAccessFile\\.<init>.*",
+                "^java\\.util\\.zip\\.ZipFile\\.<init>.*"
+              ],
+              "arg_index": "1,2"
+            }
           ],
-          "full_name_filter": [
-            "^java\\.io\\.File\\.<init>.*",
-            "^java\\.io\\.File(Input|Output)Stream\\.<init>.*",
-            "^java\\.io\\.RandomAccessFile\\.<init>.*",
-            "^java\\.util\\.zip\\.ZipFile\\.<init>.*",
-            ".*\\.(createNewFile|mkdir|mkdirs|delete|deleteOnExit|renameTo|listFiles|exists|isFile|isDirectory|canRead|canWrite|setReadable|setWritable|transferTo)\\b.*",
-            "^java\\.nio\\.file\\.(Files|Paths|Path)\\..*"
-          ],
-          "arg_index": "0,1,2",
           "sanitizers": [
             "getCanonicalPath",
             "getCanonicalFile",

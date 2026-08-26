@@ -48,16 +48,32 @@ val sinks = strList("sinks")
 val fullNameFilter = strList("full_name_filter")
 val sanitizers = strList("sanitizers")
 val sanitizerFilter = strList("sanitizer_full_name_filter")
-// Comma-separated positions, as in reachable.sc — the two queries must select the
-// same sink arguments or their facts stop joining on (file, line).
-val argIndices: List[Int] =
-  str("arg_index", "1").split(",").map(_.trim).filter(_.nonEmpty).map(_.toInt).toList
+// Sink groups, exactly as in reachable.sc — the two queries MUST select the same
+// sink arguments or their facts stop joining on (file, line) and every case loses
+// its sanitizer record. Top-level sinks/filter/arg_index are read as one group.
+case class SinkGroup(sinks: List[String], filter: List[String], indices: List[Int])
+
+def parseIndices(s: String): List[Int] =
+  s.split(",").map(_.trim).filter(_.nonEmpty).map(_.toInt).toList
+
+val sinkGroups: List[SinkGroup] = objList("sink_groups") match {
+  case Nil => List(SinkGroup(sinks, fullNameFilter, parseIndices(str("arg_index", "1"))))
+  case gs  => gs.map { g =>
+    SinkGroup(
+      g.obj.get("sinks").map(_.arr.map(_.str).toList).getOrElse(Nil),
+      g.obj.get("full_name_filter").map(_.arr.map(_.str).toList).getOrElse(Nil),
+      parseIndices(g.obj.get("arg_index").map(_.str).getOrElse("1")))
+  }
+}
+val argIndices: List[Int] = sinkGroups.flatMap(_.indices).distinct.sorted
+if (sinkGroups.forall(_.sinks.isEmpty))
+  throw new IllegalArgumentException(
+    "sanitizer_on_path: `sinks` (or a non-empty `sink_groups`) is required")
 val maxPaths = str("max_paths", "500").toInt
 
 if (annotations.isEmpty && calls.isEmpty)
   throw new IllegalArgumentException(
     "sanitizer_on_path: at least one of `annotations` or `calls` is required")
-if (sinks.isEmpty) throw new IllegalArgumentException("sanitizer_on_path: param `sinks` is required")
 if (sanitizers.isEmpty)
   throw new IllegalArgumentException("sanitizer_on_path: param `sanitizers` is required")
 
@@ -89,12 +105,18 @@ val sourceCalls: List[nodes.CfgNode] =
 
 val sourceNodes = annotatedParams ++ sourceCalls
 
-val sinkCalls = cpg.call.name(sinks*).l
-val selectedSinks =
-  if (fullNameFilter.isEmpty) sinkCalls
-  else sinkCalls.filter(c => fullNameFilter.exists(p => c.methodFullName.matches(p)))
+def selectFor(g: SinkGroup) = {
+  val calls = if (g.sinks.isEmpty) Nil else cpg.call.name(g.sinks*).l
+  if (g.filter.isEmpty) calls
+  else calls.filter(c => g.filter.exists(p => c.methodFullName.matches(p)))
+}
+val selectedSinks = sinkGroups.flatMap(selectFor).distinctBy(_.id)
+val sinkCalls = selectedSinks
 val sinkArgPairs =
-  selectedSinks.flatMap(c => argIndices.flatMap(i => c.argument.find(_.argumentIndex == i).map(a => (a, i))))
+  sinkGroups.flatMap { g =>
+    selectFor(g).flatMap(c => g.indices.flatMap(i =>
+      c.argument.find(_.argumentIndex == i).map(a => (a, i))))
+  }.distinctBy { case (a, _) => a.id }
 val argIndexOf: Map[Long, Int] = sinkArgPairs.map { case (a, i) => (a.id, i) }.toMap
 val sinkArgs: List[nodes.CfgNode] =
   sinkArgPairs.map(_._1).collectAll[nodes.CfgNode].l

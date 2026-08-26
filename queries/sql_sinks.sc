@@ -20,13 +20,27 @@
 import io.shiftleft.codepropertygraph.generated.nodes
 
 val sinks = strList("sinks")
-if (sinks.isEmpty) throw new IllegalArgumentException("sql_sinks: param `sinks` is required")
 val fullNameFilter = strList("full_name_filter")
-// Comma-separated positions, as in reachable.sc. The inventory emits one record per
-// (call, position) so a class that taints several arguments can still say which of
-// them is a runtime value — with a single value, one record per call as before.
-val argIndices: List[Int] =
-  str("arg_index", "1").split(",").map(_.trim).filter(_.nonEmpty).map(_.toInt).toList
+// Sink groups, as in reachable.sc. The inventory emits one record per (call,
+// position) so a class that taints several arguments can still say which of them is
+// a runtime value; with a single top-level position, one record per call as before.
+case class SinkGroup(sinks: List[String], filter: List[String], indices: List[Int])
+
+def parseIndices(s: String): List[Int] =
+  s.split(",").map(_.trim).filter(_.nonEmpty).map(_.toInt).toList
+
+val sinkGroups: List[SinkGroup] = objList("sink_groups") match {
+  case Nil => List(SinkGroup(sinks, fullNameFilter, parseIndices(str("arg_index", "1"))))
+  case gs  => gs.map { g =>
+    SinkGroup(
+      g.obj.get("sinks").map(_.arr.map(_.str).toList).getOrElse(Nil),
+      g.obj.get("full_name_filter").map(_.arr.map(_.str).toList).getOrElse(Nil),
+      parseIndices(g.obj.get("arg_index").map(_.str).getOrElse("1")))
+  }
+}
+if (sinkGroups.forall(_.sinks.isEmpty))
+  throw new IllegalArgumentException(
+    "sql_sinks: `sinks` (or a non-empty `sink_groups`) is required")
 
 def typeOf(n: nodes.AstNode): String = n match {
   case x: nodes.Identifier      => x.typeFullName
@@ -38,12 +52,15 @@ def typeOf(n: nodes.AstNode): String = n match {
 
 def clip(s: String, n: Int = 300): String = if (s.length > n) s.take(n) + "…" else s
 
-val allMatches = cpg.call.name(sinks*).l
-val selected =
-  if (fullNameFilter.isEmpty) allMatches
-  else allMatches.filter(c => fullNameFilter.exists(p => c.methodFullName.matches(p)))
+def selectFor(g: SinkGroup) = {
+  val calls = if (g.sinks.isEmpty) Nil else cpg.call.name(g.sinks*).l
+  if (g.filter.isEmpty) calls
+  else calls.filter(c => g.filter.exists(p => c.methodFullName.matches(p)))
+}
+val allMatches = sinkGroups.flatMap(g => if (g.sinks.isEmpty) Nil else cpg.call.name(g.sinks*).l).distinctBy(_.id)
+val selected = sinkGroups.flatMap(selectFor).distinctBy(_.id)
 
-val rows = selected.flatMap { c => argIndices.map { argIndex =>
+val rows = sinkGroups.flatMap { g => selectFor(g).flatMap { c => g.indices.map { argIndex =>
   val arg = c.argument.find(_.argumentIndex == argIndex)
   val recv = c.receiver.headOption
   ujson.Obj(
@@ -62,7 +79,7 @@ val rows = selected.flatMap { c => argIndices.map { argIndex =>
     "arg_is_literal"   -> arg.exists(_.isInstanceOf[nodes.Literal]),
     "arg_present"      -> arg.isDefined
   )
-}}
+}}}
 
 emit(
   rows,

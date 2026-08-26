@@ -30,21 +30,41 @@ val calls = strList("calls")
 val receivers = strList("receivers")
 val sinks = strList("sinks")
 val fullNameFilter = strList("full_name_filter")
-// A class may bind SEVERAL argument positions, comma-separated ("0,1,2"). One
-// position per class is a corpus artefact: path_traversal was pinned to 0 because
-// WebGoat's lesson taints a File RECEIVER, which made every static path API
-// (`Files.readAllBytes(p)`, taint at 1) invisible to it — measured, on a fixture of
-// ordinary idioms, as a whole class of real bugs the query could see and the
-// manifest could not ask for. A single value still means exactly what it did, so
-// nothing that bound "1" changes.
-val argIndices: List[Int] =
-  str("arg_index", "1").split(",").map(_.trim).filter(_.nonEmpty).map(_.toInt).toList
+// SINK GROUPS. Different sink shapes carry their taint in different places, and a
+// single position per class means the class matches only the shape its corpus
+// happens to use — path_traversal was pinned to the receiver because that is
+// WebGoat's lesson, which made every static path API invisible. One list of
+// positions for the whole class fixed the blindness but probed every sink at every
+// position, so a static call got asked about its receiver and a constructor about
+// the object being built: harmless, and noise.
+//
+// A group is {sinks, full_name_filter, arg_index} and each is matched only where
+// its taint actually lands. `sinks`/`full_name_filter`/`arg_index` at the top level
+// still work and mean exactly what they did — they are read as a single group — so
+// a manifest that never needed groups changes nothing.
+case class SinkGroup(sinks: List[String], filter: List[String], indices: List[Int])
+
+def parseIndices(s: String): List[Int] =
+  s.split(",").map(_.trim).filter(_.nonEmpty).map(_.toInt).toList
+
+val sinkGroups: List[SinkGroup] = objList("sink_groups") match {
+  case Nil => List(SinkGroup(sinks, fullNameFilter, parseIndices(str("arg_index", "1"))))
+  case gs  => gs.map { g =>
+    SinkGroup(
+      g.obj.get("sinks").map(_.arr.map(_.str).toList).getOrElse(Nil),
+      g.obj.get("full_name_filter").map(_.arr.map(_.str).toList).getOrElse(Nil),
+      parseIndices(g.obj.get("arg_index").map(_.str).getOrElse("1")))
+  }
+}
+val argIndices: List[Int] = sinkGroups.flatMap(_.indices).distinct.sorted
 val maxPaths = str("max_paths", "500").toInt
 
 if (annotations.isEmpty && calls.isEmpty)
   throw new IllegalArgumentException(
     "reachable: at least one of `annotations` or `calls` is required")
-if (sinks.isEmpty) throw new IllegalArgumentException("reachable: param `sinks` is required")
+if (sinkGroups.forall(_.sinks.isEmpty))
+  throw new IllegalArgumentException(
+    "reachable: `sinks` (or a non-empty `sink_groups`) is required")
 
 def clip(s: String, n: Int = 300): String = if (s.length > n) s.take(n) + "…" else s
 
@@ -91,10 +111,14 @@ val sourceCalls: List[nodes.CfgNode] =
 
 val sourceNodes = annotatedParams ++ sourceCalls
 
-val sinkCalls = cpg.call.name(sinks*).l
-val selectedSinks =
-  if (fullNameFilter.isEmpty) sinkCalls
-  else sinkCalls.filter(c => fullNameFilter.exists(p => c.methodFullName.matches(p)))
+// Selection is per group, so a group's filter narrows only its own sinks.
+def selectFor(g: SinkGroup) = {
+  val calls = if (g.sinks.isEmpty) Nil else cpg.call.name(g.sinks*).l
+  if (g.filter.isEmpty) calls
+  else calls.filter(c => g.filter.exists(p => c.methodFullName.matches(p)))
+}
+val selectedSinks = sinkGroups.flatMap(selectFor).distinctBy(_.id)
+val sinkCalls = selectedSinks
 // The sink node for dataflow is the ARGUMENT, not the call: we are asking
 // whether tainted data lands in the statement text, not whether the call runs.
 // Each (call, position) pair is its own sink: taint into argument 1 and taint into
@@ -102,7 +126,10 @@ val selectedSinks =
 // is carried alongside so each flow can report the position it actually landed in,
 // which keeps `sink_arg_index` a single number and the record schema untouched.
 val sinkArgPairs =
-  selectedSinks.flatMap(c => argIndices.flatMap(i => c.argument.find(_.argumentIndex == i).map(a => (a, i))))
+  sinkGroups.flatMap { g =>
+    selectFor(g).flatMap(c => g.indices.flatMap(i =>
+      c.argument.find(_.argumentIndex == i).map(a => (a, i))))
+  }.distinctBy { case (a, _) => a.id }
 val argIndexOf: Map[Long, Int] = sinkArgPairs.map { case (a, i) => (a.id, i) }.toMap
 val sinkArgs: List[nodes.CfgNode] =
   sinkArgPairs.map(_._1).collectAll[nodes.CfgNode].l

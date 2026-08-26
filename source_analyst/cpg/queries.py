@@ -9,6 +9,7 @@ Injected contract, available to every query:
     outFile : String        where the result goes (handled by `emit`)
     params  : ujson.Value   the --param / --param-json map
     strList(key, dflt)      list-of-strings param accessor
+    objList(key)            list-of-objects param accessor (e.g. sink_groups)
     str(key, dflt)          string param accessor
     emit(rows, meta)        write {"rows": [...], "meta": {...}} to outFile
 
@@ -61,6 +62,8 @@ def strList(key: String, dflt: List[String] = Nil): List[String] =
   params.obj.get(key).map(_.arr.map(_.str).toList).getOrElse(dflt)
 def str(key: String, dflt: String = ""): String =
   params.obj.get(key).map(_.str).getOrElse(dflt)
+def objList(key: String): List[ujson.Value] =
+  params.obj.get(key).map(_.arr.toList).getOrElse(Nil)
 def emit(rows: Seq[ujson.Value], meta: ujson.Value = ujson.Obj()): Unit =
   java.nio.file.Files.writeString(
     java.nio.file.Path.of(outFile), ujson.Obj("rows" -> ujson.Arr(rows*), "meta" -> meta).toString)
