@@ -195,6 +195,14 @@ first two and `null` for the third — not the same thing, and the difference is
 point: 0.0 means the stub expressed no opinion, `null` means nothing was there to
 measure against.
 
+`argument_quality` reports HOW the refutations were argued, because precision
+cannot: a case refuted for a sound reason and one refuted by a lucky guess both
+score 1.0. On the first full run all three sqli noise sites carried identical,
+fully resolved `sink_arg_type` evidence and the agent argued from it once and from
+the sink's *name* twice — precision 1.0 either way. It counts and never adjusts a
+number; the phrases live in `config/refutation.yaml`. Read it before believing a
+precision figure.
+
 A floor of 1.0 is not a high bar, it is an absent one: `path_traversal`'s labelled
 set is all `vulnerable`, so there is nothing to reject and precision cannot fail.
 `open_redirect` is the only set with labelled negatives (2 of 3 sites), which makes

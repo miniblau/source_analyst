@@ -1,0 +1,76 @@
+# How a refutation was ARGUED — presentation and measurement vocabulary, never a
+# claim about code (design §6, sibling of triage.yaml and calibration.yaml).
+#
+# WHY THIS EXISTS. `score` grades the verdict and nothing else, so a case refuted
+# for a sound reason and one refuted by a lucky guess are worth the same 1.0. That
+# is a metric which cannot fail in the one direction that matters. Measured on the
+# first full three-class run (2026-08-25): all three sqli noise sites carried
+# identical, fully resolved `sink_arg_type = MultipartFile` evidence; the agent
+# argued from that type once and from the sink's NAME twice, and precision was
+# 1.0 either way. Separately, an open_redirect case came back `refuted` at 0.9
+# with prose stating "the tainted value directly influences the redirect
+# destination" — the verdict's own argument against itself.
+#
+# CLAUDE.md's rule for this shape is explicit: where the field is cheap, have the
+# renderer flag it deterministically rather than asking the model more firmly.
+# These are regexes over the agent's `reasoning`, matched case-insensitively.
+#
+# They describe the FORM of an argument, not any vulnerability class — nothing
+# here names a sink, a source or a sanitizer, and this file must stay that way.
+# Tune them freely: they change what a scorecard reports about argument quality
+# and nothing else. A phrase list can only ever be an approximation, so the
+# scorecard reports counts for a human to read, and never adjusts precision.
+
+signals:
+  # Prose that asserts the vulnerability is real. Under a `refuted` verdict this
+  # is the model contradicting itself, and only the field is checkable.
+  - name: contradicts_verdict
+    means: >-
+      the reasoning asserts the bug while the verdict denies it; the verdict may
+      still be correct, but it is not supported by what the agent wrote
+    patterns:
+      - "is vulnerable"
+      - "still flows"
+      - "flows directly"
+      - "directly influences"
+      - "not sufficient to (conclude|prevent|rule out)"
+      - "can be exploited"
+      - "remains exploitable"
+      - "allows an attacker"
+      - "the vulnerability exists"
+
+  # Refuting from a name is the weakest argument available, and a file or package
+  # name is not an argument at all — it is a guess about code nobody read.
+  - name: argued_from_name
+    means: >-
+      the refutation rests on what something is called rather than on the
+      evidence; right or wrong, it is not supported
+    patterns:
+      - "(method|sink|class|file) ?name"
+      - "the name (of|does|suggests)"
+      - "name (does not|doesn't) (match|align)"
+      - "does not align with"
+      - "named"
+      - "package"
+    # …unless the same sentence also argues from the evidence, which is what the
+    # agent prompt actually asks for. A refutation that names the sink AND cites
+    # the resolved type is arguing properly and must not be counted against.
+    excused_by:
+      - "argument type"
+      - "arg_type"
+      - "type is"
+      - "resolved to"
+      - "type of the (tainted )?(value|argument)"
+
+  # The counterpart, counted so the report is not only bad news: this is what the
+  # prompt asks for, in its own words.
+  - name: argued_from_evidence
+    means: the refutation cites the tainted value's resolved type or the call-site code
+    patterns:
+      - "argument type"
+      - "arg_type"
+      - "type is"
+      - "resolved to"
+      - "type of the (tainted )?(value|argument)"
+      - "call site"
+      - "the code (at|shows)"

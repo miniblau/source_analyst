@@ -55,6 +55,68 @@ def hyp(fact_id: str, status: str, conf: float = 0.5, **kw) -> dict:
     return records.record("hypothesis", base, src="agent:test")
 
 
+class TestArgumentQuality(unittest.TestCase):
+    """Precision cannot tell a sound refutation from a lucky one.
+
+    Both score 1.0, and on the first full three-class run that difference was
+    real: all three sqli noise sites carried identical, fully resolved
+    `sink_arg_type` evidence, and the agent argued from it once and from the
+    sink's NAME twice. Separately an open_redirect case came back `refuted` while
+    its own prose said the tainted value "directly influences the redirect
+    destination". This block is what makes that visible; it must never move a
+    number, because a phrase list is an approximation.
+    """
+
+    def refuted(self, reasoning):
+        h = hyp("f_x", "refuted", 0.9)
+        h["reasoning"] = reasoning
+        return h
+
+    def signals(self, reasoning):
+        log = [flow("A.java", 20)]
+        h = self.refuted(reasoning)
+        h["evidence"] = [log[0]["id"]]
+        return sc.score(log + [h], truth(), "sqli", None)[0]["argument_quality"]
+
+    def test_prose_that_argues_the_bug_under_a_refuted_verdict_is_flagged(self):
+        a = self.signals("The source is an Integer used as a map key. However the "
+                         "tainted value directly influences the redirect destination.")
+        self.assertEqual(a["signals"]["contradicts_verdict"], 1)
+
+    def test_refuting_from_a_name_is_flagged(self):
+        a = self.signals("The sink name 'execute' does not align with this class.")
+        self.assertEqual(a["signals"]["argued_from_name"], 1)
+        self.assertEqual(a["signals"]["argued_from_evidence"], 0)
+
+    def test_naming_the_sink_while_citing_the_type_is_not_held_against_it(self):
+        """The prompt asks for exactly this shape, so it must not be penalised."""
+        a = self.signals("The sink is named 'execute', but the argument type is "
+                         "MultipartFile, which cannot hold SQL statement text.")
+        self.assertEqual(a["signals"]["argued_from_name"], 0)
+        self.assertEqual(a["signals"]["argued_from_evidence"], 1)
+
+    def test_no_refutation_is_null_not_zero(self):
+        """Nothing to characterise and nothing wrong are different answers."""
+        log = [flow("A.java", 20)]
+        h = hyp(log[0]["id"], "needs_proof", 0.9)
+        a = sc.score(log + [h], truth(), "sqli", None)[0]["argument_quality"]
+        self.assertEqual(a["n"], 0)
+        self.assertIsNone(a["signals"])
+        self.assertIn("nothing to characterise", a["note"])
+
+    def test_it_never_moves_precision(self):
+        """A phrase list must not launder a guess into a metric."""
+        log = [flow("A.java", 20)]
+        good = self.refuted("the argument type is MultipartFile")
+        good["evidence"] = [log[0]["id"]]
+        bad = self.refuted("the sink name does not match")
+        bad["evidence"] = [log[0]["id"]]
+        a = sc.score(log + [good], truth(), "sqli", None)[0]
+        b = sc.score(log + [bad], truth(), "sqli", None)[0]
+        self.assertEqual(a["precision"], b["precision"])
+        self.assertEqual(a["recall"], b["recall"])
+
+
 class TestGroundTruthLoading(unittest.TestCase):
     """The oracle must not shrink quietly.
 

@@ -185,6 +185,63 @@ def calibrate(kept: list[dict], facts: dict[str, dict]) -> dict[str, Any]:
     return out
 
 
+def refutation_signals() -> list[dict[str, Any]]:
+    """How a refutation was argued (config/refutation.yaml). Data, like the bands."""
+    env = os.environ.get("SOURCE_ANALYST_CONFIG")
+    base = Path(env).expanduser().resolve() if env else repo_root() / "config"
+    path = base / "refutation.yaml"
+    if not path.is_file():
+        raise ScoreError(f"missing {path} — argument-quality vocabulary is config, not code")
+    doc = yaml.safe_load(path.read_text()) or {}
+    rows = doc.get("signals")
+    if not rows:
+        raise ScoreError(f"{path}: expected a non-empty `signals` list")
+    return rows
+
+
+def argument_quality(rows: list[dict], by_id: dict[str, dict]) -> dict[str, Any]:
+    """Deterministic read of HOW the refutations in this run were argued.
+
+    `score` grades the verdict and nothing else, so a case refuted for a sound
+    reason and one refuted by a lucky guess are worth the same 1.0 — a metric that
+    cannot fail in the direction that matters. This does not change precision and
+    must not: a phrase list is an approximation, and adjusting a number by it would
+    launder a guess into a measurement. It reports counts for a human to read.
+
+    Three nothings are kept apart here, as everywhere else in this module: a run
+    with no refutations returns `null` (nothing to look at), which is not the same
+    as a run whose refutations were all well argued (zero).
+    """
+    sigs = refutation_signals()
+    refuted = [r for r in rows if r.get("status") == "refuted"]
+    if not refuted:
+        return {"n": 0, "signals": None,
+                "note": "no refutation in the scored set, so nothing to characterise"}
+
+    def compiled(pats):
+        return [re.compile(p, re.I) for p in pats or []]
+
+    out: dict[str, Any] = {}
+    examples: dict[str, str] = {}
+    for sig in sigs:
+        pats = compiled(sig.get("patterns"))
+        excuse = compiled(sig.get("excused_by"))
+        hits = []
+        for r in refuted:
+            prose = str((by_id.get(r["id"], {}) or {}).get("reasoning") or "")
+            if not any(p.search(prose) for p in pats):
+                continue
+            if excuse and any(p.search(prose) for p in excuse):
+                continue
+            hits.append(r["sink"])
+        out[sig["name"]] = len(hits)
+        if hits:
+            examples[sig["name"]] = hits[0]
+    return {"n": len(refuted), "signals": out, "examples": examples,
+            "means": {s["name"]: " ".join(str(s.get("means", "")).split())
+                      for s in sigs}}
+
+
 def statuses() -> dict[str, dict[str, Any]]:
     env = os.environ.get("SOURCE_ANALYST_CONFIG")
     base = Path(env).expanduser().resolve() if env else repo_root() / "config"
@@ -297,6 +354,11 @@ def score(log: list[dict], truth: dict, vuln_class: str, src: str | None) -> dic
         # at least one hypothesis. A site can survive on one source and be lost on
         # another, and case recall alone hides that.
         "site_recall": rate(len(kept_sites & vuln_sites), len(vuln_sites)),
+        # HOW the refutations were argued, which precision cannot see: a sound
+        # refutation and a lucky one both score 1.0. Counts only — it never moves
+        # a number, because a phrase list is an approximation and adjusting a
+        # metric by one would launder a guess into a measurement.
+        "argument_quality": argument_quality(rows, {h["id"]: h for h in hyps}),
         # Reads the kept set only, so unlike `separation` it survives a model that
         # keeps no noise. See config/calibration.yaml.
         "calibration": calibrate([r for r in rows if r["kept"]], facts),
