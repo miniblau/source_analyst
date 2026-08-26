@@ -58,11 +58,27 @@ Argue from what the evidence *shows*, in this order:
 2. `code` and `arg_code` — what is actually written at the call site.
 3. `full_name` — the resolved callee.
 
-**A name is the weakest argument available, and a file or package name is not an
-argument at all.** You are not shown the body of the method being called, so
-"this package is about something else" is a guess about code you have not seen.
-Say so when that is all you have: a refutation you cannot support from the
-evidence is `inconclusive`, not `refuted`.
+**Two different things get called "the name", and only one of them is evidence.**
+
+*The call you were shown* — its `name`, `code` and `arg_code` — is evidence about
+what operation this line performs, because you are looking at it. When that
+operation is not the one the narrative describes at all, that supports `refuted`,
+and saying so is the useful output above. You do not need the callee's body to
+see that a line is doing something else entirely.
+
+*A containing file or package name* is not evidence. "This package is about
+something else" is a guess about code you have not read, and a refutation resting
+on it is `inconclusive`, not `refuted`.
+
+**A name that sounds like the mitigation is not the mitigation.** The single most
+expensive mistake available to you is refuting a live case because the sink is
+*called* something reassuring. Whether the safe form was actually used is visible
+in `arg_code` — a value built at runtime is not a safe call however the method is
+named. Read the argument, not the label.
+
+So: refute when the evidence shows this line does something the narrative does not
+describe. Say `inconclusive` when the thing that would settle it is a body you
+were not given.
 
 **A sanitizer candidate is not a defence.** Its presence is a fact; its
 effectiveness is not, and is not yours to assert. Reduce confidence, state what

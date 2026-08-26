@@ -38,6 +38,14 @@ signals:
       - "remains exploitable"
       - "allows an attacker"
       - "the vulnerability exists"
+      # Added after a live miss: the run that fixed the inconclusive/refuted
+      # boundary produced "This indicates the vulnerability is still present, so
+      # the hypothesis is refuted" — a flat self-contradiction that the list above
+      # did not match. A detector that under-reports reads as evidence the problem
+      # is gone, which is the worse direction to be wrong in.
+      - "(vulnerability|issue|bug) is (still )?present"
+      - "still (present|exploitable|vulnerable)"
+      - "is still reached"
 
   # Refuting from a name is the weakest argument available, and a file or package
   # name is not an argument at all — it is a guess about code nobody read.
