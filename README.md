@@ -195,6 +195,15 @@ first two and `null` for the third — not the same thing, and the difference is
 point: 0.0 means the stub expressed no opinion, `null` means nothing was there to
 measure against.
 
+**A single run is not a measurement.** Temperature 0 is not reproducible here:
+three runs of a byte-identical 15,711-byte briefing (verified by diffing the
+transcripts) agreed on two cases and disagreed on the third, the marginal one —
+`refuted 0.8` once, `inconclusive 0.5` twice. llama.cpp is not bit-deterministic
+across runs, so verdicts are stable where the model is confident and unstable
+exactly on the borderline cases that decide precision. Comparing a prompt or
+manifest change on one run of a small set cannot separate the change from noise;
+repeat the run and report the spread.
+
 `argument_quality` reports HOW the refutations were argued, because precision
 cannot: a case refuted for a sound reason and one refuted by a lucky guess both
 score 1.0. On the first full run all three sqli noise sites carried identical,
