@@ -15,6 +15,8 @@
 //   (at least one of the two is required)
 //   receivers   [string] optional — regexes over the call receiver's type, to
 //                        narrow `calls` when a short name is generic
+//   member_reads [string] optional — regexes over the CODE of a field access, for
+//                        input that arrives as a property (`req.query.name`)
 //
 // emits kind=source_candidate; meta carries CPG-wide counts and the annotation
 // names actually present, so an empty result can be told apart from a frontend
@@ -25,9 +27,21 @@ import io.shiftleft.codepropertygraph.generated.nodes
 val annotations = strList("annotations")
 val calls = strList("calls")
 val receivers = strList("receivers")
-if (annotations.isEmpty && calls.isEmpty)
+// A THIRD ORIGIN, because the first two are Java-shaped. Java web input arrives as
+// an annotated parameter or a named call; JavaScript input arrives as a MEMBER READ
+// off a request object — `req.query.name` — which is neither. In the CPG that is an
+// `<operator>.fieldAccess` call, and matching those by NAME is useless: on a
+// four-route fixture it selects all 19 field accesses, `res.json` and `db.query`
+// among them. So these are regexes over the access's CODE, which is the only thing
+// that distinguishes `req.query` from `res.json`.
+//
+// This is not a JavaScript special case. Any language whose framework hands input
+// through a property rather than a parameter needs it, and a class that binds none
+// of these behaves exactly as before.
+val memberReads = strList("member_reads")
+if (annotations.isEmpty && calls.isEmpty && memberReads.isEmpty)
   throw new IllegalArgumentException(
-    "request_sources: at least one of `annotations` or `calls` is required")
+    "request_sources: at least one of `annotations`, `calls` or `member_reads` is required")
 
 def clip(s: String, n: Int = 300): String = if (s.length > n) s.take(n) + "…" else s
 

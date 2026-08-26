@@ -422,6 +422,37 @@ class TestGolden(unittest.TestCase):
                                  "construction — the value never becomes the "
                                  "dangerous part")
 
+    def test_a_second_language_reaches_its_sink(self):
+        """Everything before this ran on Java, and only Java.
+
+        Five fixtures, one real app, one `manifests/patterns/` directory — so every
+        claim about the design being language-agnostic was a claim about code nobody
+        had run twice. This is the second language, and it found the one place the
+        design was genuinely Java-shaped: both source origins (`annotations`, and
+        named `calls`) describe how JAVA delivers request input. Express delivers it
+        as a property read off the request object, which is neither, so no manifest
+        could ask for it until `member_reads` existed. Sinks needed nothing.
+        """
+        fx = FIXTURES["js_sqli_flow"]
+        src = ROOT / fx["path"]
+        if not src.is_dir():
+            self.skipTest("js fixture not present")
+        facts, meta = run_query(src, "reachable",
+                                manifest_params("sqli", "js", "reachable"), fx["lang"])
+        self.assertTrue(meta["query_meta"]["dataflow_overlay"],
+                        "no dataflow overlay on the JS CPG — emptiness would be a lie")
+
+        # positives: the direct concatenation and the one through a helper
+        self.assertEqual(len(facts), 2, [f["sink_arg_code"] for f in facts])
+        self.assertEqual({f["source_code"] for f in facts}, {"req.query.name"})
+        self.assertTrue(any(f["crosses_methods"] > 1 for f in facts),
+                        "the helper route should cross a method boundary")
+
+        # negatives from the SAME sink name: bound placeholder, and constant-only.
+        subjects = " ".join(f["subject"] for f in facts)
+        for control in ("/safe", "/all"):
+            self.assertNotIn(control, subjects)
+
     def test_sanitizer_facts_join_with_reachable(self):
         """Both queries must agree on the (source, sink) pairs they describe."""
         fx = FIXTURES["webgoat"]

@@ -1,0 +1,75 @@
+# SQLi patterns for JavaScript (design §10.1). The SECOND language, and the first
+# evidence that anything here works outside Java.
+#
+# Everything about this file is data. The class manifest, the queries and the tools
+# are the same ones Java uses; what differs is below, and that was the claim being
+# tested — with one exception, named in `sources`, which needed a query change and
+# is the finding.
+
+class: sqli
+language: js
+
+sources:
+  # NO ANNOTATIONS, NO SOURCE CALLS. Both Java origins are empty here, and that is
+  # the point: Java web input arrives as an annotated parameter (@RequestParam) or a
+  # named call (request.getParameter). Express hands it over as a PROPERTY READ off
+  # the request object — `req.query.name` — which is neither, and no manifest could
+  # ask for it because the vocabulary had no way to say it.
+  #
+  # In the CPG that is an `<operator>.fieldAccess` call, and matching those by name
+  # selects every field access in the file: measured on this fixture, 19 of them,
+  # including `res.json` and `db.query`. The access's CODE is the only thing that
+  # separates a read off the request from a read off anything else, so `member_reads`
+  # matches on that. It was a query change, not a manifest one — the node vocabulary
+  # is a hard boundary (§10.3) and this is what hitting it looks like.
+  annotations: []
+  calls: []
+  member_reads:
+    - "^req\\.(query|body|params|headers|cookies)(\\..*)?$"
+    - "^request\\.(query|body|params|headers|cookies)(\\..*)?$"
+    - "^ctx\\.(query|request|params)(\\..*)?$"
+
+sinks:
+  # Short names, portable-first (§10.3), exactly as Java does it. `query` covers
+  # node-postgres, mysql/mysql2 and knex.raw's callers; `raw` covers knex and
+  # Sequelize's escape hatch; `exec`/`run`/`all`/`get` are sqlite3's.
+  sinks:
+    - query
+    - raw
+    - exec
+    - execute
+    - run
+    - all
+  # KNOWN NOISE, stated rather than filtered: `get`, `run` and `all` are generic
+  # enough to collide widely, and `get` is left OUT for that reason — on Express
+  # code `app.get` is a route registration, which would match every route in the
+  # program. That is the same trade sqli/java documents for `execute`.
+  full_name_filter: []
+  arg_index: "1"
+
+sanitizers:
+  # CANDIDATES ONLY, as everywhere. Binding is the real fix in this ecosystem: a
+  # parameter array (`db.query(sql, [v])`) leaves the value out of the statement
+  # text entirely, which is why the fixture's bound route produces no flow at all
+  # rather than a flow with a sanitizer on it.
+  sanitizers:
+    - escape
+    - escapeId
+    - format
+    - sanitize.*
+    - validate.*
+    - replace
+    - encodeURIComponent
+  sanitizer_full_name_filter: []
+
+queries:
+  sql_sinks:         [sinks]
+  request_sources:   [sources]
+  reachable:         [sources, sinks]
+  sanitizer_on_path: [sources, sinks, sanitizers]
+
+# No struct_grep rule set yet: opengrep rules are per language and js/sqli has not
+# been written or validated. Absent rather than empty, so nothing reports a clean
+# pattern scan it never ran.
+
+max_static_tier: static_reachability

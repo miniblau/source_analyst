@@ -290,13 +290,17 @@ class TestSelection(unittest.TestCase):
         rows = applicable(["java", "js"])
         self.assertTrue(rows, "no class applied to java — the manifest tree is broken")
 
-        # The property is every class's, not sqli's. This assertion used to
-        # destructure a single row, which quietly encoded "there is exactly one
-        # vuln class" and broke the moment path_traversal was added — a test
-        # asserting the shape of the corpus rather than the behaviour under test.
+        # The property is every class's, and it is about the PARTITION, not about
+        # which languages happen to exist. This assertion has now encoded the
+        # corpus twice: first "there is exactly one vuln class" (broke when
+        # path_traversal arrived), then "java is the only realized language"
+        # (broke the moment js/sqli.yaml was written). Both times the test was
+        # describing today's tree rather than the behaviour under test.
+        asked = ["java", "js"]
         for vc, realized, unrealized in rows:
-            self.assertEqual(realized, ["java"], vc.name)
-            self.assertEqual(unrealized, ["js"], vc.name)
+            self.assertEqual(sorted(realized + unrealized), asked, vc.name)
+            self.assertEqual(set(realized) & set(unrealized), set(), vc.name)
+            self.assertTrue(realized, f"{vc.name} applies to nothing that is realized")
 
         self.assertIn("sqli", {vc.name for vc, _, _ in rows})
 

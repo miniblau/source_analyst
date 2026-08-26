@@ -617,5 +617,44 @@
         }
       }
     }
+  },
+  "js_sqli_flow": {
+    "path": "corpus/fixtures/js_sqli_flow",
+    "lang": "JSSRC",
+    "note": "the second LANGUAGE. Express routes: two concatenated, one bound via a placeholder array, one constant. Proves the class manifest, queries and tools work outside Java, and that request input arriving as a property read is reachable.",
+    "queries": {
+      "request_sources": {
+        "params": {
+          "annotations": [],
+          "calls": [],
+          "member_reads": [
+            "^req\\.(query|body|params|headers|cookies)(\\..*)?$",
+            "^request\\.(query|body|params|headers|cookies)(\\..*)?$",
+            "^ctx\\.(query|request|params)(\\..*)?$"
+          ]
+        }
+      },
+      "reachable": {
+        "params": {
+          "annotations": [],
+          "calls": [],
+          "member_reads": [
+            "^req\\.(query|body|params|headers|cookies)(\\..*)?$",
+            "^request\\.(query|body|params|headers|cookies)(\\..*)?$",
+            "^ctx\\.(query|request|params)(\\..*)?$"
+          ],
+          "sinks": [
+            "query",
+            "raw",
+            "exec",
+            "execute",
+            "run",
+            "all"
+          ],
+          "full_name_filter": [],
+          "arg_index": "1"
+        }
+      }
+    }
   }
 }

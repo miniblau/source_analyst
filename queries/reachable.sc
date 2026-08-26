@@ -12,6 +12,8 @@
 //   annotations [string] regexes over parameter annotation short names
 //   calls       [string] regexes over source-call short names
 //   receivers   [string] optional — narrow `calls` by receiver type regex
+//   member_reads [string] optional — regexes over the CODE of a field access, for
+//                        input that arrives as a property (`req.query.name`)
 // params (sinks):
 //   sinks            [string] required — sink short-name regexes
 //   full_name_filter [string] optional — regexes over methodFullName
@@ -28,6 +30,18 @@ import io.shiftleft.codepropertygraph.generated.nodes
 val annotations = strList("annotations")
 val calls = strList("calls")
 val receivers = strList("receivers")
+// A THIRD ORIGIN, because the first two are Java-shaped. Java web input arrives as
+// an annotated parameter or a named call; JavaScript input arrives as a MEMBER READ
+// off a request object — `req.query.name` — which is neither. In the CPG that is an
+// `<operator>.fieldAccess` call, and matching those by NAME is useless: on a
+// four-route fixture it selects all 19 field accesses, `res.json` and `db.query`
+// among them. So these are regexes over the access's CODE, which is the only thing
+// that distinguishes `req.query` from `res.json`.
+//
+// This is not a JavaScript special case. Any language whose framework hands input
+// through a property rather than a parameter needs it, and a class that binds none
+// of these behaves exactly as before.
+val memberReads = strList("member_reads")
 val sinks = strList("sinks")
 val fullNameFilter = strList("full_name_filter")
 // SINK GROUPS. Different sink shapes carry their taint in different places, and a
@@ -59,9 +73,9 @@ val sinkGroups: List[SinkGroup] = objList("sink_groups") match {
 val argIndices: List[Int] = sinkGroups.flatMap(_.indices).distinct.sorted
 val maxPaths = str("max_paths", "500").toInt
 
-if (annotations.isEmpty && calls.isEmpty)
+if (annotations.isEmpty && calls.isEmpty && memberReads.isEmpty)
   throw new IllegalArgumentException(
-    "reachable: at least one of `annotations` or `calls` is required")
+    "reachable: at least one of `annotations`, `calls` or `member_reads` is required")
 if (sinkGroups.forall(_.sinks.isEmpty))
   throw new IllegalArgumentException(
     "reachable: `sinks` (or a non-empty `sink_groups`) is required")
@@ -109,7 +123,16 @@ val sourceCalls: List[nodes.CfgNode] =
    else matchedCalls.filter(c => receivers.exists(r => receiverType(c).matches(r))))
     .collectAll[nodes.CfgNode].l
 
-val sourceNodes = annotatedParams ++ sourceCalls
+// Field accesses whose code matches, e.g. `req.query.name`. Longest match wins in
+// practice because the outer access (`req.query.name`) and the inner one
+// (`req.query`) both match — taking both is harmless, they are on the same path.
+val memberNodes: List[nodes.CfgNode] =
+  if (memberReads.isEmpty) Nil
+  else cpg.call.name("<operator>.fieldAccess")
+         .filter(c => memberReads.exists(r => c.code.matches(r)))
+         .collectAll[nodes.CfgNode].l
+
+val sourceNodes = annotatedParams ++ sourceCalls ++ memberNodes
 
 // Selection is per group, so a group's filter narrows only its own sinks.
 def selectFor(g: SinkGroup) = {
