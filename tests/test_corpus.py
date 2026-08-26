@@ -18,6 +18,8 @@ import sys
 import unittest
 from pathlib import Path
 
+from source_analyst import records
+
 ROOT = Path(__file__).resolve().parents[1]
 FIXTURES = json.loads((ROOT / "corpus" / "fixtures.json").read_text())
 GOLDEN = ROOT / "corpus" / "golden"
@@ -452,6 +454,38 @@ class TestGolden(unittest.TestCase):
         subjects = " ".join(f["subject"] for f in facts)
         for control in ("/safe", "/all"):
             self.assertNotIn(control, subjects)
+
+    def test_a_lead_is_not_a_clean_result(self):
+        """`render` must distinguish "nothing looked" from "we looked, found nothing".
+
+        tiers.yaml names this as the distinction that matters most, and Juice Shop
+        makes it concrete: the CPG holds 147 files, exactly the .ts count, so all 80
+        Angular templates are absent and every `[innerHTML]` binding is unreachable
+        by every query. Reporting only what the queries reached would describe code
+        no query ever read.
+
+        A lead is DECLARED by the rule (`cpg_visible: false`), never inferred from
+        "no flow at this line" — inferring it would turn a sink a query examined and
+        cleared into a lead, which is the same conflation upside down.
+        """
+        from source_analyst.lifecycle.render import leads
+
+        visible = records.fact(
+            {"kind": "sink_candidate", "vuln_class": "xss", "file": "a.ts", "line": 5,
+             "code": "el.innerHTML = x", "rule": "js_xss_dom_sink",
+             "rule_meta": {"cpg_visible": True}}, "opengrep:js_xss_dom_sink")
+        blind = records.fact(
+            {"kind": "sink_candidate", "vuln_class": "xss", "file": "a.html", "line": 9,
+             "code": '<div [innerHTML]="v">', "rule": "js_xss_template_binding",
+             "rule_meta": {"cpg_visible": False}}, "opengrep:js_xss_template_binding")
+        other = records.fact(
+            {"kind": "sink_candidate", "vuln_class": "sqli", "file": "b.html", "line": 1,
+             "code": "x", "rule": "r", "rule_meta": {"cpg_visible": False}}, "opengrep:r")
+
+        got = leads([visible, blind, other], "xss")
+        self.assertEqual([f["file"] for f in got], ["a.html"],
+                         "only a sink the CPG cannot see is a lead, and only for "
+                         "the class being rendered")
 
     def test_sanitizer_facts_join_with_reachable(self):
         """Both queries must agree on the (source, sink) pairs they describe."""

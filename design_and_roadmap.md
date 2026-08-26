@@ -1069,6 +1069,43 @@ spine cleanly across three languages without touching the template blind-spot. X
 class #2, deferred until `struct_grep` stitching exists (GraphQL/template work),
 proving the "Joern-blind but JSONL-unified" path.
 
+**XSS landed 2026-08-26, and split into two surfaces.** The deferral in §10.7 was
+right and the reason is now measured, not assumed: on Juice Shop's Angular frontend
+the CPG contains 147 files, exactly the .ts count, so all 80 templates are absent and
+every `[innerHTML]` binding is invisible to every query. So the class covers:
+
+  * the **code** surface — `bypassSecurityTrustHtml`, `eval`, `document.write` are
+    calls the CPG sees, so a source reaches them and they earn `static_reachability`.
+    Seven flows on the frontend, including Juice Shop's own annotated DOM XSS line
+    (`search-result.component.ts:144` ← `route.snapshot.queryParams.q`).
+  * the **template** surface — twelve `[innerHTML]` bindings no query can read,
+    reported by `render` as LEADS at `static_pattern`, with no agent judging them and
+    no confidence attached. `tiers.yaml` already required this distinction: "nothing
+    looked" must never render as "we looked and found nothing".
+
+A lead is DECLARED by its rule (`cpg_visible: false`), never inferred from "no flow
+at this line" — inferring it would turn a sink a query examined and cleared into a
+lead, the same conflation upside down.
+
+**Leads are rendered, not briefed — and a triage leg (option C) is the intended
+successor.** `static_pattern` carries `is_hypothesis: false`, so a lead is not a
+hypothesis and is not sent to an agent; `render` lists them deterministically for a
+human. That is right at twelve leads and wrong at three hundred: a reviewer cannot
+read a table that long, and much of it is uninteresting (`[innerHTML]="'KEY' |
+translate"` binds a constant). The successor is a SEPARATE leg — a `triage` agent
+emitting `lead` records rather than hypotheses, kept out of `score`'s precision so a
+cheap pattern hit never dilutes a reachability finding. It was not built now because
+inventing a record type is a §10.4 change and twelve rows do not justify one. Build
+it when a corpus produces enough leads that the table stops being readable.
+
+**Nothing connects a template binding to the component field behind it.** Juice
+Shop's DOM XSS spans two files — `search-result.component.ts:144` assigns
+`bypassSecurityTrustHtml(queryParam)` to `searchValue`, and
+`search-result.component.html:11` renders `[innerHTML]="searchValue"`. The binding
+between them is Angular semantics neither substrate models, and guessing it is how a
+tool starts inventing edges it cannot prove. The template hit is a lead; the
+connection is a reviewer's.
+
 **Path traversal took the #2 slot instead — decided 2026-08-25.** XSS's prerequisite is
 still absent: `struct_grep scan` exists and is corpus-tested, but `brief._cases()`
 iterates CPG `flow` facts, so an opengrep `sink_candidate` can only *enrich* a case a

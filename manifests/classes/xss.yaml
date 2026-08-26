@@ -1,0 +1,51 @@
+# Cross-site scripting — the language-agnostic concept (design §10.1, §10.7).
+#
+# §10.7's class #2, deferred until struct_grep could reach a sink no query can see.
+# That is now measured rather than assumed: on Juice Shop's Angular frontend the
+# CPG contains 147 files, exactly the .ts count, so all 80 templates are absent and
+# every `[innerHTML]` binding is invisible to every query.
+#
+# This class therefore spans TWO SURFACES that earn different tiers, and the
+# difference is the honest part:
+#
+#   code      an escape hatch or DOM write in a .ts/.js file — a call the CPG sees,
+#             so a source can be traced to it and it reaches static_reachability
+#   template  a framework binding in markup the CPG does not parse — no query can
+#             assess it, so it is a LEAD at static_pattern and no agent judges it
+#
+# A class ceiling is per language, so js/xss declares static_reachability for the
+# half that earns it; the template half is reported by `render` as leads and never
+# dressed up as a judged case.
+
+class: xss
+title: Cross-site scripting
+applies_to: [js, java]
+
+narrative: >-
+  A value the caller controls is written into a page as markup rather than as
+  text, so the attacker's input is parsed as HTML or script instead of displayed
+  as characters. The bug is the context, not the value: the same string rendered
+  as text is harmless, and escaping that is correct for one context — HTML body,
+  attribute, URL, script — is useless or harmful in another. Consequence is
+  execution in the victim's session: reading anything the page can read, acting
+  as the user, and persisting if the value is stored and served to others.
+
+seed_hypotheses:
+  - The framework escapes by default and this line is an explicit opt-out, so the
+    developer overrode a working defence on purpose and the question is only
+    whether the value can be attacker-controlled.
+  - The value is written into an attribute or a URL rather than an HTML body, so
+    escaping suitable for text does not close it and the payload needs no tags.
+  - The value is stored and rendered later to a different user, making this
+    persistent — a stored payload reaches people who never sent a request.
+  - The sink is in markup the analyser does not parse, so nothing assessed
+    reachability; the binding's name has to be traced back to the component or
+    controller field by hand.
+  - A sanitizer runs but is configured to allow some markup, so the question is
+    which tags and attributes survive rather than whether escaping happened.
+
+max_static_tier: static_reachability
+
+references:
+  - https://cwe.mitre.org/data/definitions/79.html
+  - https://owasp.org/www-community/attacks/xss/

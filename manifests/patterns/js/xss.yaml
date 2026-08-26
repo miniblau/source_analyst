@@ -1,0 +1,80 @@
+# XSS patterns for JavaScript and its frameworks (design §10.1).
+#
+# TWO SURFACES, and the split is the honest part of this file. Measured on Juice
+# Shop's Angular frontend: the CPG holds 147 files, exactly the .ts count, so all
+# 80 templates are absent and every `[innerHTML]` binding is invisible to every
+# query. This file covers the half the queries CAN read; the other half is
+# reported by `render` as leads at `static_pattern` from the rules below, and is
+# never dressed up as a judged case.
+#
+# FRAMEWORK AND LANGUAGE TOGETHER, never one or the other. Angular's
+# `bypassSecurityTrustHtml` is a framework escape hatch and `eval` is a JavaScript
+# fact, and a React app contains both — the framework aims to prevent XSS, which
+# is exactly why its escape hatches are the interesting sinks, and developers
+# write plain unsafe JS alongside. Both are listed here, tagged in the comments
+# so a reader can see which is which.
+
+class: xss
+language: js
+
+sources:
+  # Angular delivers request input as a PROPERTY read, not an annotated parameter
+  # or a named call, so `member_reads` carries this class the way it carries
+  # Express. `route.snapshot.queryParams.x` is how Juice Shop's DOM XSS begins.
+  annotations: []
+  calls:
+    # Explicit reads that ARE calls.
+    - getItem              # localStorage / sessionStorage
+    - get                  # URLSearchParams / HttpParams
+  member_reads:
+    # Angular router
+    - "^.*route\\.snapshot\\.queryParams(\\..*)?$"
+    - "^.*route\\.snapshot\\.params(\\..*)?$"
+    - "^.*\\.queryParamMap(\\..*)?$"
+    # the platform, true in any framework
+    - "^.*location\\.(search|hash|href)$"
+    - "^document\\.(URL|referrer|cookie)$"
+    - "^window\\.name$"
+
+sinks:
+  # Framework escape hatches (Angular DomSanitizer) and language-level dynamic
+  # evaluation. All of these are CALLS, which is what makes them CPG-visible;
+  # `el.innerHTML = x` is an assignment, not a call, and is therefore covered by
+  # the rule set rather than here.
+  sinks:
+    - bypassSecurityTrustHtml
+    - bypassSecurityTrustScript
+    - bypassSecurityTrustResourceUrl
+    - bypassSecurityTrustStyle
+    - bypassSecurityTrustUrl
+    - eval
+    - write                # document.write
+    - insertAdjacentHTML
+  full_name_filter: []
+  arg_index: "1"
+
+sanitizers:
+  # CANDIDATES ONLY. In this ecosystem the real fix is letting the framework
+  # escape — which looks like the ABSENCE of a bypass call, not the presence of a
+  # sanitizer — so an empty candidate list here says nothing about safety.
+  sanitizers:
+    - sanitize
+    - escape
+    - encodeURI
+    - encodeURIComponent
+    - textContent
+    - createTextNode
+    - DOMPurify
+  sanitizer_full_name_filter: []
+
+queries:
+  sql_sinks:         [sinks]
+  request_sources:   [sources]
+  reachable:         [sources, sinks]
+  sanitizer_on_path: [sources, sinks, sanitizers]
+
+# The template surface: sinks no query can reach, reported as leads.
+rules:
+  - js/xss
+
+max_static_tier: static_reachability

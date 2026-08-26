@@ -60,6 +60,38 @@ def site_of(rec: dict, by_id: dict[str, dict]) -> str:
     return store.site_of(rec, by_id) or str(rec.get("case", "?"))
 
 
+def leads(log: list[dict], vuln_class: str) -> list[dict]:
+    """Sinks NO QUERY COULD ASSESS, which is not the same as finding nothing.
+
+    `tiers.yaml` draws the distinction this function exists to preserve:
+
+        assessed at static_reachability, no path found  — we looked, found nothing
+        ceiling is static_pattern, never assessed       — no query can see this sink
+
+    Collapsing the second into the first downgrades a real lead by implying a clean
+    result. Measured on Juice Shop's Angular frontend: the CPG holds 147 files,
+    exactly the .ts count, so all 80 templates are absent and every `[innerHTML]`
+    binding is invisible to every query. Reporting only what the queries reached
+    would have said "12 sinks, none reachable" about code no query ever read.
+
+    A lead is declared, not inferred: the RULE says whether the CPG can see that
+    shape (`cpg_visible: false`), because that is vuln knowledge and belongs in the
+    rule file. Inferring it from "no flow at this line" would conflate exactly the
+    two things above — a sink a query examined and cleared would become a lead.
+
+    These are not hypotheses. `static_pattern` carries `is_hypothesis: false`: a
+    lead is something for a human to look at, and no agent has judged it.
+    """
+    out = []
+    for f in log:
+        if f.get("kind") != "sink_candidate" or f.get("vuln_class") != vuln_class:
+            continue
+        if (f.get("rule_meta") or {}).get("cpg_visible") is not False:
+            continue
+        out.append(f)
+    return sorted(out, key=lambda f: (str(f.get("file")), f.get("line") or 0))
+
+
 def main(argv: list[str] | None = None) -> int:
     p = argparse.ArgumentParser(prog="render", description=__doc__)
     p.add_argument("--class", dest="vuln_class", required=True)
@@ -258,6 +290,28 @@ def main(argv: list[str] | None = None) -> int:
         # traces to substrate facts by id.
         w(f"<sub>Evidence: {', '.join(h.get('evidence', []))} · "
           f"hypothesis {h.get('id','?')} via {h.get('src','?')} · finding via {f.get('src','?')}</sub>\n\n---\n\n")
+
+    lead_rows = leads(log, args.vuln_class)
+    if lead_rows:
+        # Deliberately BEFORE the refuted section and after the findings: these are
+        # not findings and not exclusions, and a reader who stops early must still
+        # see that part of the attack surface was never assessed at all.
+        w("## Leads \u2014 sinks no query could assess\n\n")
+        w(f"{len(lead_rows)} sink(s) were found by pattern search in code the "
+          "reachability queries cannot read \u2014 template and markup surfaces the "
+          "code-property graph does not parse. **This is not \"we looked and found "
+          "no path\"**: nothing examined these, so there is no path to report either "
+          "way. They carry tier `static_pattern`, whose entire claim is that a sink "
+          "exists at this location.\n\n")
+        w("No agent has judged them and no confidence is attached. Whether the "
+          "value bound here is attacker-controlled is a question for a reviewer, "
+          "and the usual next step is to read the component or controller behind "
+          "the binding.\n\n")
+        w("| Location | Rule | Code |\n|---|---|---|\n")
+        for f in lead_rows:
+            code = " ".join(str(f.get("code", "")).split())[:90].replace("|", "\\|")
+            w(f"| `{f.get('file')}:{f.get('line')}` | {f.get('rule','?')} | `{code}` |\n")
+        w("\n")
 
     if unsettled:
         # A case the agent investigated and could not settle belongs to neither list:
