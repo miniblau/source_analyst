@@ -1,0 +1,84 @@
+# XSS sink patterns for JavaScript and its frameworks (design §10.1).
+#
+# This rule set exists because of something Joern cannot do. Measured on Juice
+# Shop's Angular frontend: the CPG contains 147 files, exactly the .ts count —
+# all 80 `.html` templates are absent, because jssrc2cpg does not parse Angular
+# templates at all. Every `[innerHTML]` binding is therefore invisible to every
+# query, and `tiers.yaml` already names this exact situation: a sink no query can
+# reach is a LEAD at `static_pattern`, never a clean result.
+#
+# The two halves of a real DOM XSS live in different files:
+#
+#   search-result.component.ts:144   searchValue = bypassSecurityTrustHtml(param)
+#   search-result.component.html:11  <span [innerHTML]="searchValue">
+#
+# Joern sees the first. Only this file sees the second. Nothing here connects
+# them — the binding between a component field and its template is Angular
+# semantics that neither substrate models — so the template hit is reported as a
+# lead and the connection is left to a reviewer, honestly, rather than guessed.
+#
+# `languages:` below is OPENGREP's vocabulary, not ours. Template rules run in
+# `generic` mode because an Angular template is not HTML any parser here knows.
+
+rules:
+  # ---- framework template bindings: invisible to the CPG ---------------------
+  - id: js_xss_template_binding
+    languages: [generic]
+    severity: WARNING
+    message: >-
+      A framework template binding writes raw HTML into the DOM. Whether the value
+      is attacker-controlled is not decided here.
+    metadata:
+      vuln_class: xss
+      kind: sink_candidate
+      dynamic_arg: true
+      surface: template
+      cpg_visible: false
+    patterns:
+      # REGEX, not a pattern. `[innerHTML]="$X"` in generic mode binds only a bare
+      # identifier: measured on this frontend it matched 4 of 12 real bindings, and
+      # the 8 it dropped were the interesting ones — `data.productData.description`,
+      # `item?.args`, `user.email`, and translation-pipe expressions. A metavariable
+      # that stops at a dot is a recall bug reporting 33% as though it were the total.
+      - pattern-regex: >-
+          \[(innerHTML|outerHTML)\]\s*=\s*"([^"]+)"|\sv-html\s*=\s*"([^"]+)"
+
+  - id: js_xss_sanitizer_bypass
+    languages: [js, ts]
+    severity: WARNING
+    message: >-
+      An explicit opt-out of the framework's HTML escaping.
+    metadata:
+      vuln_class: xss
+      kind: sink_candidate
+      dynamic_arg: true
+      surface: code
+      cpg_visible: true
+    patterns:
+      - pattern-either:
+          - pattern: $S.bypassSecurityTrustHtml(...)      # Angular DomSanitizer
+          - pattern: $S.bypassSecurityTrustScript(...)
+          - pattern: $S.bypassSecurityTrustResourceUrl(...)
+      - pattern-not: $S.bypassSecurityTrustHtml("...")
+
+  # ---- language-level sinks: true whatever the framework ---------------------
+  - id: js_xss_dom_sink
+    languages: [js, ts]
+    severity: WARNING
+    message: >-
+      A DOM write or dynamic evaluation of a runtime value.
+    metadata:
+      vuln_class: xss
+      kind: sink_candidate
+      dynamic_arg: true
+      surface: code
+      cpg_visible: true
+    patterns:
+      - pattern-either:
+          - pattern: $EL.innerHTML = $X
+          - pattern: $EL.outerHTML = $X
+          - pattern: document.write($X)
+          - pattern: eval($X)
+          - pattern: $EL.insertAdjacentHTML($POS, $X)
+      - pattern-not: $EL.innerHTML = "..."
+      - pattern-not: eval("...")
