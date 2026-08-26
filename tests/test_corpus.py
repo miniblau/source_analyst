@@ -374,6 +374,54 @@ class TestGolden(unittest.TestCase):
                 f"{vuln_class} lost coverage of {sorted(expect - got)} — a shape no "
                 f"WebGoat run exercises. Reached: {sorted(got)}")
 
+    def test_false_positive_rate_on_safe_code(self):
+        """The number WebGoat cannot give us.
+
+        WebGoat is ~all-vulnerable, so precision there is measured against almost
+        nothing to reject, and the rate at which these classes fire on ordinary safe
+        code was simply never measured. This fixture is safe BY CONSTRUCTION — bound
+        parameters, an allowlist lookup, fixed paths — never safe by sanitizer, since
+        a sanitizer on the path is still a flow and `reachable` is right to report it.
+
+        The expectations below are a MEASUREMENT, pinned so it cannot quietly get
+        worse. They are deliberately not all zero: `execute` is an unfiltered short
+        name in the sqli list and it fires on a task runner here, which is the cost
+        of portable-first matching stated as a number instead of a caveat.
+        """
+        fx = FIXTURES["java_clean_controls"]
+        src = ROOT / fx["path"]
+        if not src.is_dir():
+            self.skipTest("clean-controls fixture not present")
+
+        expected = {
+            # class            (n flows, why)
+            "sqli": (1, "TaskRunner.execute — an unfiltered short name colliding on "
+                        "ordinary code, the same shape as WebGoat's ProfileUpload"),
+            "path_traversal": (0, "the java.nio.file filter rejects Buffers.copy"),
+            "open_redirect": (1, "the allowlist redirect: a real flow that is not a "
+                                 "bug, which is a labelled negative and not a "
+                                 "substrate false positive"),
+        }
+        for vuln_class, (want, why) in expected.items():
+            params = manifest_params(vuln_class, "java", "reachable")
+            facts, _ = run_query(src, "reachable", params, fx["lang"])
+            got = [(f["sink_name"], f["sink_arg_code"]) for f in facts]
+            self.assertEqual(
+                len(facts), want,
+                f"{vuln_class} fires {len(facts)} time(s) on safe-by-construction "
+                f"code, expected {want} ({why}). Reported: {got}")
+
+        # And the three that must never fire, by name, so a regression is legible.
+        for vuln_class in expected:
+            params = manifest_params(vuln_class, "java", "reachable")
+            facts, _ = run_query(src, "reachable", params, fx["lang"])
+            subjects = " ".join(f["subject"] for f in facts)
+            for safe in ("boundParameter", "fixedPath"):
+                self.assertNotIn(safe, subjects,
+                                 f"{vuln_class} fired on {safe}, which is safe by "
+                                 "construction — the value never becomes the "
+                                 "dangerous part")
+
     def test_sanitizer_facts_join_with_reachable(self):
         """Both queries must agree on the (source, sink) pairs they describe."""
         fx = FIXTURES["webgoat"]

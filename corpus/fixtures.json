@@ -571,5 +571,51 @@
         }
       }
     }
+  },
+  "java_clean_controls": {
+    "path": "corpus/fixtures/java_clean_controls",
+    "lang": "JAVASRC",
+    "note": "negative control: code safe BY CONSTRUCTION (bound parameters, allowlist lookup, fixed paths) plus name-collision bait that is actually CALLED. Measures the false-positive rate, which WebGoat cannot because it is almost entirely vulnerable.",
+    "queries": {
+      "reachable": {
+        "params": {
+          "annotations": [
+            "RequestParam",
+            "PathVariable",
+            "RequestBody",
+            "RequestHeader",
+            "CookieValue"
+          ],
+          "calls": [
+            "getParameter",
+            "getParameterValues",
+            "getHeader",
+            "getQueryString",
+            "getCookies",
+            "getInputStream",
+            "getReader"
+          ],
+          "sinks": [
+            "executeQuery",
+            "executeUpdate",
+            "execute",
+            "executeLargeUpdate",
+            "addBatch",
+            "prepareStatement",
+            "prepareCall",
+            "createQuery",
+            "createNativeQuery",
+            "createSQLQuery",
+            "queryForList",
+            "queryForObject",
+            "queryForMap",
+            "queryForRowSet",
+            "batchUpdate"
+          ],
+          "full_name_filter": [],
+          "arg_index": "1"
+        }
+      }
+    }
   }
 }
