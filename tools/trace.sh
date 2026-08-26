@@ -51,12 +51,23 @@ params=$(mktemp); trap 'rm -f "$params"' EXIT
 
 echo "trace: $class/$lang at status '$status', batches of $size via runner '$runner'" >&2
 
+# Cases whose revision `admit` refused this run. They are SKIPPED, not forgiven:
+# the record was rejected outright and nothing about them entered the log. Without
+# this the loop re-briefs the same case every turn and, at temperature 0, gets the
+# identical rejection back — so one unusable answer costs the class. Measured on
+# WebGoat 2026-08-25: sqli died on turn 21 of ~26 having already admitted 20
+# children and 13 beliefs, path_traversal on turn 4 of ~5. A per-turn refusal rate
+# of about 5% makes completing a 26-turn class a coin-flip at best (0.95^26).
+skip=""
+refused=0
+max_refusals="${TRACE_MAX_REFUSALS:-5}"
+
 turn=0
 while true; do
   # Non-zero here means "nothing left to descend into" — the loop's normal end, and
   # the message on stderr says which of the reasons applies.
   if ! brief --agent trace --class "$class" --lang "$lang" --status "$status" \
-              --callees > "$params"; then
+              --exclude "$skip" --callees > "$params"; then
     break
   fi
   turn=$((turn + 1))
@@ -70,12 +81,54 @@ while true; do
     | belief append >/dev/null
 
   # Always batch 0: each admitted child removes its parent from the eligible set,
-  # so the queue drains from the front. No `|| true` — a batch that fails stops the
-  # run, because a tree that looks deeper than it is, is worse than a shallow one.
+  # so the queue drains from the front. The batch is written to a file first so the
+  # ids in it are known if it has to be skipped — a pipe cannot be read twice.
+  batch=$(mktemp)
   brief --agent trace --class "$class" --lang "$lang" --status "$status" \
-        --chunk-size "$size" --chunk 0 \
-    | run_agent --agent trace \
-    | admit --type trace --class "$class" --lang "$lang" --src "agent:trace" >/dev/null
+        --exclude "$skip" --chunk-size "$size" --chunk 0 > "$batch"
+
+  # Still no `|| true`: a refused batch admits NOTHING, and half a revision is worse
+  # than none. What changed is the blast radius — the case is dropped from this run
+  # instead of the class being abandoned. It keeps whatever status it already had,
+  # so `report` still writes it up from the pre-trace judgement and nothing is
+  # silently lost; the count of skipped cases is printed at the end.
+  if ! run_agent --agent trace < "$batch" \
+       | admit --type trace --class "$class" --lang "$lang" --src "agent:trace" >/dev/null; then
+    ids=$(python3 -c "
+import json,sys
+out=[]
+for line in open(sys.argv[1]):
+    line=line.strip()
+    if not line.startswith('{'): continue
+    d=json.loads(line)
+    if d.get('kind')=='trace_case':
+        h=d.get('hypothesis') or {}
+        i=h.get('id') or d.get('id')
+        if i: out.append(i)
+print(','.join(out))" "$batch")
+    rm -f "$batch"
+    if [ -z "$ids" ]; then
+      echo "trace: a batch was refused and its case ids could not be read — stopping," \
+           "because skipping a case this loop cannot name would re-brief it forever" >&2
+      exit 6
+    fi
+    skip="${skip:+$skip,}$ids"
+    refused=$((refused + 1))
+    echo "trace: batch refused by admit — skipping case(s) $ids ($refused of at most" \
+         "$max_refusals; nothing was admitted for them)" >&2
+    if [ "$refused" -gt "$max_refusals" ]; then
+      echo "trace: stopped after $max_refusals refusals — this is a model or contract" \
+           "problem, not a deep tree, and grinding through the rest would hide it" >&2
+      exit 5
+    fi
+    continue
+  fi
+  rm -f "$batch"
 done
+
+if [ "$refused" -gt 0 ]; then
+  echo "trace: $refused case(s) were skipped after admit refused their revision —" \
+       "they keep their pre-trace status and are still reported" >&2
+fi
 
 echo "trace: done — $turn turn(s)" >&2

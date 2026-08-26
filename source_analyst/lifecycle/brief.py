@@ -215,10 +215,20 @@ def callees_of(h: dict, by_id: dict[str, dict]) -> list[str]:
     return sorted(names)
 
 
-def traceable(log: list[dict], status: str, cfg: dict[str, Any]) -> list[dict]:
+def traceable(log: list[dict], status: str, cfg: dict[str, Any],
+              exclude: frozenset[str] = frozenset()) -> list[dict]:
     """Hypotheses this round may descend into (§4.2).
 
-    Three gates, and each one is a different reason to stop:
+    `exclude` is the caller's skip list: hypotheses whose revision `admit` already
+    refused this run. Without it the trace loop re-briefs the same case every turn
+    and, at temperature 0, gets the identical rejection back — so one unusable
+    revision costs the whole class rather than the one case. Measured on this
+    corpus: sqli died on turn 21 of ~26 having admitted 20 children, and
+    path_traversal on turn 4 of ~5. Skipping is not forgiving the record — `admit`
+    still refuses it and nothing enters the log; it only stops one bad answer from
+    discarding every other case's work.
+
+    Four gates, and each one is a different reason to stop:
       * a leaf only — a hypothesis that already has a child was traced already,
         and re-tracing it would fork the tree instead of deepening it;
       * `depth < max` — the hard stop, without which "and what does THAT call"
@@ -232,6 +242,8 @@ def traceable(log: list[dict], status: str, cfg: dict[str, Any]) -> list[dict]:
     out = []
     for h in hyps:
         if h.get("status") != status or h["id"] in has_child:
+            continue
+        if h["id"] in exclude:
             continue
         depth = int(h.get("depth", 0) or 0)
         if depth >= cfg["max"]:
@@ -311,7 +323,8 @@ def _slim_callee(c: dict) -> dict:
     return out
 
 
-def _trace_rows(log: list[dict], status: str, cfg: dict[str, Any]) -> list[dict]:
+def _trace_rows(log: list[dict], status: str, cfg: dict[str, Any],
+                exclude: frozenset[str] = frozenset()) -> list[dict]:
     by_id = {r["id"]: r for r in log}
     bodies: dict[str, dict] = {}
     for f in log:
@@ -319,7 +332,7 @@ def _trace_rows(log: list[dict], status: str, cfg: dict[str, Any]) -> list[dict]
             # Latest wins: a re-run after a source change supersedes the old read.
             bodies[f.get("full_name", "")] = f
     rows = []
-    for h in traceable(log, status, cfg):
+    for h in traceable(log, status, cfg, exclude):
         wanted = callees_of(h, by_id)
         rows.append({
             "kind": "trace_case",
@@ -398,6 +411,9 @@ def main(argv: list[str] | None = None) -> int:
     p.add_argument("--status",
                    help="report/trace agents: which hypothesis status to brief on"
                         " (default: proposed for report, needs_proof for trace)")
+    p.add_argument("--exclude", default="",
+                   help="trace agent: comma-separated hypothesis ids to skip this"
+                        " round, for cases whose revision admit already refused")
     p.add_argument("--chunk-size", type=int, metavar="N",
                    help="emit rows in batches of N; see --chunk")
     p.add_argument("--chunk", type=int, default=0, metavar="I",
@@ -417,6 +433,7 @@ def main(argv: list[str] | None = None) -> int:
         raise SystemExit("brief: --callees is only meaningful for --agent trace")
     if args.status is None:
         args.status = "needs_proof" if args.agent == "trace" else "proposed"
+    excluded = frozenset(i for i in (args.exclude or "").split(",") if i.strip())
 
     try:
         vc = load_class(args.vuln_class)
@@ -429,7 +446,7 @@ def main(argv: list[str] | None = None) -> int:
     if args.callees:
         cfg = depth_config()
         by_id = {r["id"]: r for r in log}
-        wanted = sorted({n for h in traceable(log, args.status, cfg)
+        wanted = sorted({n for h in traceable(log, args.status, cfg, excluded)
                          for n in callees_of(h, by_id)})
         if not wanted:
             # A params object with no methods would make `callee_body` throw, which
@@ -441,7 +458,8 @@ def main(argv: list[str] | None = None) -> int:
                 f" {cfg['spend_gate']}), or none names a callee")
         print(json.dumps({"methods": wanted}, ensure_ascii=False, separators=(",", ":")))
         print(json.dumps({"cmd": "brief", "agent": "trace", "callees": len(wanted),
-                          "status": args.status, "log": str(store.log_path())},
+                          "status": args.status, "excluded": len(excluded),
+                          "log": str(store.log_path())},
                          separators=(",", ":")), file=sys.stderr)
         return 0
     tiers = tier_table()
@@ -476,7 +494,7 @@ def main(argv: list[str] | None = None) -> int:
         header["status_filter"] = None
     elif args.agent == "trace":
         cfg = depth_config()
-        rows = _trace_rows(log, args.status, cfg)
+        rows = _trace_rows(log, args.status, cfg, excluded)
         if args.limit:
             rows = rows[:args.limit]
         header["status_filter"] = args.status
@@ -558,7 +576,7 @@ def main(argv: list[str] | None = None) -> int:
     # tokens against a 16384 context and the batch died mid-record. Note that
     # bytes/4 is the wrong conversion for source — Java identifiers and code
     # measured about 2.3 chars per token, so budget against the smaller number.
-    print(json.dumps({"cmd": "brief", "agent": args.agent, "rows": len(rows),
+    print(json.dumps({"cmd": "brief", "agent": args.agent, "rows": len(rows), "excluded": len(excluded),
                       "rows_total": total, "chunk": args.chunk, "chunks": n_chunks,
                       "beliefs": len(beliefs), "bytes": written,
                       "log": str(store.log_path())},

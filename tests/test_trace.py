@@ -32,6 +32,26 @@ def hyp(hid, status="needs_proof", confidence=0.5, depth=0, parent=None, evidenc
 class TestTraceable(unittest.TestCase):
     """Three gates, three different reasons to stop. None substitutes for another."""
 
+    def test_an_excluded_case_is_skipped_and_the_rest_survive(self):
+        """A refused revision must cost its own case, not the class.
+
+        `admit` refuses a revision that cites a fabricated id, and it is right to —
+        a hallucinated belief would be trusted by every later run. But trace re-briefs
+        the same case each turn and at temperature 0 gets the identical refusal back,
+        so without a skip list one unusable answer discards every other case's work.
+        Measured on WebGoat: sqli died on turn 21 of ~26 with 20 children already
+        admitted. Skipping forgives nothing — the record stayed rejected.
+        """
+        log = [hyp("h_a"), hyp("h_b")]
+        self.assertEqual([h["id"] for h in traceable(log, "needs_proof", CFG)],
+                         ["h_a", "h_b"])
+        kept = traceable(log, "needs_proof", CFG, frozenset({"h_a"}))
+        self.assertEqual([h["id"] for h in kept], ["h_b"])
+
+    def test_excluding_everything_ends_the_round_rather_than_looping(self):
+        self.assertEqual(
+            traceable([hyp("h_a")], "needs_proof", CFG, frozenset({"h_a"})), [])
+
     def test_a_leaf_is_traceable(self):
         self.assertEqual([h["id"] for h in traceable([hyp("h_a")], "needs_proof", CFG)],
                          ["h_a"])
