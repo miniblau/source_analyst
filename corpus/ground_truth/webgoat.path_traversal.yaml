@@ -9,7 +9,15 @@
 # what WebGoat is famous for. `why` records what was read, so a wrong label can be
 # argued with rather than trusted.
 #
-# Scope: the 3 distinct sink sites the substrate reported on the pinned
+# SCOPE IS NOT A COMPLIMENT TO THE TOOL. This file was first written against the 3
+# sites the substrate then reported, and precision, recall and site-recall all read
+# 1.0 — while the class was pinned to a single sink shape and could not see
+# ProfileZipSlip, a path-traversal lesson in this very corpus. A ground-truth file
+# scoped to what the tool found cannot report what the tool cannot see, and the
+# metric built on it will say the coverage is perfect. Widened 2026-08-26 after
+# per-shape sink groups took the case set from 5 to 17.
+#
+# Scope: the 11 distinct sink sites the substrate reported on the pinned
 # commit with manifests/patterns/java/path_traversal.yaml, across 5 (source, sink)
 # pairs — ProfileUploadBase:52 is reached from three different endpoints and is ONE
 # site here, because `score` keys this file by sink. A site the substrate
@@ -80,3 +88,88 @@ sites:
       attacker-chosen path resolved into, and the names are returned in the body.
       Same root cause, a distinct sink line and a distinct consequence
       (enumeration rather than existence disclosure).
+
+  # ---- zip slip, found only after the class stopped being pinned to one shape ----
+
+  - sink: src/main/java/org/owasp/webgoat/lessons/pathtraversal/ProfileZipSlip.java:79
+    sources: [file]
+    label: vulnerable
+    why: >-
+      `new File(tmpZipDirectory.toFile(), e.getName())` builds a path from the ZIP
+      ENTRY name, which the attacker chooses by crafting the archive, and line 81
+      writes to it with Files.copy(REPLACE_EXISTING). Nothing canonicalizes the
+      entry name or checks that the result stays under tmpZipDirectory, so an entry
+      called `../../x` escapes it. This is zip slip, and it is the lesson this file
+      exists to teach.
+    discriminator: >-
+      The tainted value never appears as a request parameter. It enters as an
+      uploaded file, is read back out of the archive by `e.getName()`, and only then
+      becomes a path — a reasoner tracing "which @RequestParam is this" finds
+      nothing and can talk itself into `not_this_class`.
+
+  - sink: src/main/java/org/owasp/webgoat/lessons/pathtraversal/ProfileZipSlip.java:81
+    sources: [file, getInputStream]
+    label: vulnerable
+    why: >-
+      The write itself: Files.copy(is, f.toPath(), REPLACE_EXISTING) where `f` is
+      the File built at line 79 from the attacker-controlled entry name. Same root
+      cause as the site above, and this is the line that does the damage.
+
+  - sink: src/main/java/org/owasp/webgoat/lessons/pathtraversal/ProfileZipSlip.java:75
+    sources: [file]
+    label: vulnerable
+    why: >-
+      `new ZipFile(uploadedZipFile.toFile())` where uploadedZipFile is
+      `tmpZipDirectory.resolve(file.getOriginalFilename())` at line 73 — the
+      multipart filename, which the client sets. `Path.resolve` with an absolute or
+      traversing argument does not stay under the base.
+
+  # ---- WebWolf's file host, same shape, different app -------------------------
+
+  - sink: src/main/java/org/owasp/webgoat/webwolf/FileServer.java:93
+    sources: [getInputStream, multipartFile]
+    label: vulnerable
+    why: >-
+      `destinationDir.toPath().resolve(multipartFile.getOriginalFilename())` at line
+      91 takes the client-supplied filename and Files.copy writes to it. Nothing
+      canonicalizes or confines the result to destinationDir.
+    discriminator: >-
+      This is WebWolf, the companion tool rather than a lesson, so it is easy to
+      wave through as "not the app under test". The traversal is real either way:
+      whether a file host is *meant* to accept a path is a judgement about intent,
+      and the evidence shows only that an untrusted name reaches a write unchecked.
+
+  - sink: src/main/java/org/owasp/webgoat/webwolf/FileServer.java:92
+    sources: [multipartFile]
+    label: vulnerable
+    why: >-
+      Files.deleteIfExists on the same resolved path, one line before the write. A
+      traversing filename deletes a file outside destinationDir, which is a distinct
+      consequence from overwriting one.
+
+  - sink: src/main/java/org/owasp/webgoat/webwolf/FileServer.java:95
+    sources: [multipartFile]
+    label: vulnerable
+    why: >-
+      `new File(destinationDir, multipartFile.getOriginalFilename())` — the same
+      untrusted name built into a path again for the log line. Lower consequence
+      than the write above, and the same unchecked input.
+
+  # ---- the two remaining ProfileUpload sites the widening added ---------------
+
+  - sink: src/main/java/org/owasp/webgoat/lessons/pathtraversal/ProfileUploadBase.java:51
+    sources: [file, fullName]
+    label: vulnerable
+    why: >-
+      `new File(uploadDirectory, fullName)` — the construction whose result line 52
+      then creates. The same bug as ProfileUploadBase:52 seen one line earlier, and
+      reported separately because taint arrives at the constructor's second
+      argument rather than at a receiver.
+
+  - sink: src/main/java/org/owasp/webgoat/lessons/pathtraversal/ProfileUploadRetrieval.java:101
+    sources: [getParameter]
+    label: vulnerable
+    why: >-
+      `new File(catPicturesDirectory, (id == null ? RandomUtils.nextInt(1,11) : id) + ".jpg")`
+      builds the path from the `id` request parameter; lines 108 and 117 then probe
+      and list it. Same root cause as those two sites, at the construction point.
