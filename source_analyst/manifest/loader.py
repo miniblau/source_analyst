@@ -110,6 +110,7 @@ class Patterns:
     queries: dict[str, list[str]]
     rules: list[str]
     max_static_tier: str
+    frameworks: list[str]
     path: Path
 
     def reachability_assessed(self) -> bool:
@@ -210,7 +211,11 @@ def load_patterns(vuln_class: str, language: str) -> Patterns:
             f"{path}: declares {doc['class']}/{doc['language']} but is filed as "
             f"{language}/{vuln_class}")
 
-    reserved = set(PATTERN_REQUIRED) | {"rules", "max_static_tier"}
+    # `frameworks` joins these: it is a declaration ABOUT the file, not a block of
+    # query parameters. It selects nothing — a class's sinks are always the union of
+    # its language-level and framework-level entries — and exists so `detect` can
+    # report a framework present in the source and covered by no pattern file.
+    reserved = set(PATTERN_REQUIRED) | {"rules", "max_static_tier", "frameworks"}
     blocks = {k: v for k, v in doc.items() if k not in reserved}
     for name, block in blocks.items():
         if not isinstance(block, dict):
@@ -254,6 +259,7 @@ def load_patterns(vuln_class: str, language: str) -> Patterns:
         queries=bound,
         rules=[str(r) for r in doc.get("rules", [])],
         max_static_tier=tier,
+        frameworks=[str(f) for f in doc.get("frameworks", [])],
         path=path,
     )
 

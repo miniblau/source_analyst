@@ -83,4 +83,12 @@ queries:
 rules:
   - java/open_redirect
 
+# Frameworks whose vocabulary this file carries. Declaring them buys ONE
+# thing: `manifest detect` can say a framework is present in the source and
+# covered by nothing. It selects nothing and filters nothing — a class's
+# sinks are always the union of its language-level and framework-level
+# entries, because a framework that prevents a bug is exactly why its escape
+# hatches matter, and people write plain unsafe code beside them.
+frameworks: [spring]
+
 max_static_tier: static_reachability

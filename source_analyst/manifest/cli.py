@@ -26,8 +26,11 @@ from pathlib import Path
 
 from .. import records
 from . import detect
+import yaml
+
 from .loader import (
     ManifestError,
+    config_dir,
     applicable,
     available_classes,
     available_patterns,
@@ -43,6 +46,15 @@ def _emit(obj: dict, to_stdout: bool = True) -> None:
     print(line, file=sys.stdout if to_stdout else sys.stderr)
 
 
+def framework_map() -> dict:
+    """Framework signals (config/frameworks.yaml). Data, like the language map."""
+    path = config_dir() / "frameworks.yaml"
+    if not path.is_file():
+        return {}
+    doc = yaml.safe_load(path.read_text()) or {}
+    return doc.get("frameworks") or {}
+
+
 def cmd_detect(args: argparse.Namespace) -> int:
     src = Path(args.src).expanduser().resolve()
     if not src.is_dir():
@@ -50,9 +62,42 @@ def cmd_detect(args: argparse.Namespace) -> int:
     report: dict = {}
     rows = detect.counts(src, language_map(), report)
     src_id = "manifest:detect"
-    n = records.write_jsonl((records.fact(r, src_id) for r in rows), sys.stdout)
-    _emit({"cmd": "detect", "src": str(src), "languages": n,
-           "detected": [r["language"] for r in rows], **report}, to_stdout=False)
+
+    # Frameworks present in the tree, and — the point of collecting them — which of
+    # them no pattern file covers. A language declared with no pattern file is
+    # already reported as a coverage gap so a short result cannot read as a clean
+    # one; without this, scanning an Angular app with React-only patterns produced
+    # exactly that short result and nothing said so.
+    #
+    # This selects NOTHING. A class's sinks stay the union of its language-level and
+    # framework-level entries whatever is detected here, because a framework that
+    # prevents a bug is precisely why its escape hatches are worth matching, and
+    # people write plain unsafe code beside them.
+    langs = {r["language"] for r in rows}
+    fw_rows = detect.frameworks(src, framework_map(), langs)
+    covered: dict[str, list[str]] = {}
+    for vc in available_classes():
+        for lang in langs:
+            try:
+                pats = load_patterns(vc, lang)
+            except ManifestError:
+                continue
+            for fw in pats.frameworks:
+                covered.setdefault(fw, []).append(f"{lang}/{vc}")
+    for r in fw_rows:
+        r["covered_by"] = sorted(covered.get(r["framework"], []))
+
+    n = records.write_jsonl(
+        (records.fact(r, src_id) for r in rows + fw_rows), sys.stdout)
+    uncovered = sorted(r["framework"] for r in fw_rows if not r["covered_by"])
+    _emit({"cmd": "detect", "src": str(src), "languages": len(rows),
+           "detected": [r["language"] for r in rows],
+           "frameworks": [r["framework"] for r in fw_rows],
+           # Named separately and never folded into a count: a framework nothing
+           # covers is work nobody has done, and the operator must not infer it
+           # from a report that is merely short.
+           "frameworks_uncovered": uncovered,
+           "facts": n, **report}, to_stdout=False)
     return 0
 
 

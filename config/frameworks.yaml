@@ -1,0 +1,55 @@
+# Framework detection (design §10.2, sibling of languages.yaml) — explicit and boring.
+#
+# WHY A FRAMEWORK IS ITS OWN DIMENSION, when the manifests already mix the two.
+# `java/sqli.yaml` carries Spring (`RequestParam`, `queryForList`), JPA
+# (`createQuery`) and plain JDBC (`executeQuery`) in one list, and that works:
+# unmatched vocabulary costs essentially nothing, measured — JdbcTemplate and JPA
+# names sat unused against WebGoat with no penalty and fired correctly the moment
+# a fixture used them.
+#
+# What merging cannot do is tell you what was NEVER COVERED. A language declared
+# in `applies_to` with no pattern file is already reported as a coverage gap,
+# deliberately, so a short report cannot read as a clean one. There was no
+# equivalent for frameworks: scan an Angular app with React-only patterns and you
+# get a short report that looks clean. That is the same failure one level down.
+#
+# IT IS A UNION, NEVER A FALLBACK. On a React app you want `dangerouslySetInnerHTML`
+# AND `eval` live at once. React aims to prevent XSS, which is exactly why its
+# escape hatches are the interesting sinks — and people write plain unsafe JS
+# beside them regardless. A precedence chain that stopped at the framework layer
+# would drop the language layer's sinks, so nothing here filters: detection drives
+# REPORTING, and the patterns are always all of them.
+#
+# `deps` are package/dependency names; `imports` are regexes over import statements.
+# A framework needs one signal, not all of them.
+
+frameworks:
+  angular:
+    language: js
+    deps: ["@angular/core", "@angular/common"]
+    imports: ["from '@angular/", "from \"@angular/"]
+
+  react:
+    language: js
+    deps: ["react", "react-dom"]
+    imports: ["from 'react'", "from \"react\"", "require\\('react'\\)"]
+
+  vue:
+    language: js
+    deps: ["vue"]
+    imports: ["from 'vue'", "from \"vue\""]
+
+  express:
+    language: js
+    deps: ["express"]
+    imports: ["require\\('express'\\)", "from 'express'"]
+
+  spring:
+    language: java
+    deps: ["spring-boot-starter", "spring-webmvc", "spring-context"]
+    imports: ["^import org\\.springframework\\."]
+
+  jakarta_servlet:
+    language: java
+    deps: ["jakarta.servlet-api", "javax.servlet-api"]
+    imports: ["^import (jakarta|javax)\\.servlet\\."]

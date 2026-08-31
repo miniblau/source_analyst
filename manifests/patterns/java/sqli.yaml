@@ -101,4 +101,12 @@ rules:
 # Verification ceiling for THIS language (§6). Guarded: the loader rejects a
 # tier whose queries are not bound above, so this cannot claim reachability the
 # substrate cannot deliver.
+# Frameworks whose vocabulary this file carries. Declaring them buys ONE
+# thing: `manifest detect` can say a framework is present in the source and
+# covered by nothing. It selects nothing and filters nothing — a class's
+# sinks are always the union of its language-level and framework-level
+# entries, because a framework that prevents a bug is exactly why its escape
+# hatches matter, and people write plain unsafe code beside them.
+frameworks: [spring, jakarta_servlet]
+
 max_static_tier: static_reachability

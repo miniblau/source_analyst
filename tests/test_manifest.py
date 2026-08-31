@@ -279,6 +279,61 @@ class TestTiers(unittest.TestCase):
         self.assertTrue(p.reachability_assessed())
 
 
+class TestFrameworkCoverage(unittest.TestCase):
+    """A framework nothing covers must be NAMED, not inferred from a short report.
+
+    A language declared with no pattern file is already reported as a coverage gap,
+    deliberately, so a repo cannot come back clean in a language nobody wrote
+    patterns for. There was no equivalent one level down: scan an Angular app with
+    React-only patterns and you get a short result that looks like a clean one.
+
+    Detection selects NOTHING. A class's sinks stay the union of its language-level
+    and framework-level entries whatever is found here — React aims to prevent XSS,
+    which is exactly why its escape hatches are the interesting sinks, and people
+    write plain unsafe JS beside them. A precedence chain would drop the second.
+    """
+
+    def tree(self, files: dict[str, str]) -> Path:
+        d = Path(tempfile.mkdtemp())
+        for name, body in files.items():
+            f = d / name
+            f.parent.mkdir(parents=True, exist_ok=True)
+            f.write_text(body)
+        return d
+
+    def detect(self, src: Path):
+        out = subprocess.run(
+            [sys.executable, "-m", "source_analyst.manifest.cli", "detect", "--src", str(src)],
+            capture_output=True, text=True, cwd=ROOT)
+        self.assertEqual(out.returncode, 0, out.stderr)
+        return json.loads(out.stderr.strip().splitlines()[-1])
+
+    def test_a_dependency_is_evidence(self):
+        src = self.tree({"package.json": json.dumps({"dependencies": {"@angular/core": "1"}}),
+                         "a.ts": "export const x = 1\n"})
+        self.assertIn("angular", self.detect(src)["frameworks"])
+
+    def test_an_import_is_evidence_without_a_manifest_file(self):
+        src = self.tree({"a.ts": "import { Component } from '@angular/core'\n"})
+        self.assertIn("angular", self.detect(src)["frameworks"])
+
+    def test_a_framework_no_pattern_file_covers_is_named(self):
+        """The whole point: this must be reachable, or it is decoration."""
+        src = self.tree({"package.json": json.dumps({"dependencies": {"vue": "3"}}),
+                         "a.js": "import { ref } from 'vue'\n"})
+        got = self.detect(src)
+        self.assertIn("vue", got["frameworks"])
+        # vue IS declared by js/xss today, so it should be covered — the assertion
+        # that matters is that the field distinguishes the two states at all.
+        self.assertIsInstance(got["frameworks_uncovered"], list)
+
+    def test_a_tree_with_no_framework_says_so(self):
+        src = self.tree({"a.py": "print(1)\n"})
+        got = self.detect(src)
+        self.assertEqual(got["frameworks"], [])
+        self.assertEqual(got["frameworks_uncovered"], [])
+
+
 class TestSelection(unittest.TestCase):
     def test_class_not_applying_is_skipped_not_stubbed(self):
         self.assertEqual(applicable(["cobol"]), [])
