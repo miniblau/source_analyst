@@ -487,6 +487,42 @@ class TestGolden(unittest.TestCase):
                          "only a sink the CPG cannot see is a lead, and only for "
                          "the class being rendered")
 
+    def test_juiceshop_xss_reaches_its_labelled_sites(self):
+        """The second real application, and the first non-Java one.
+
+        Every metric this project has produced came from WebGoat, whose ground truth
+        was scoped to what the substrate had already found — which is how it hid
+        ProfileZipSlip, a labelled lesson in that same corpus, while reading 1.0.
+        Juice Shop's oracle is the project's own: challenges.yml, codefixes/, and
+        `vuln-code-snippet vuln-line` markers in the source. This test asserts the
+        substrate still reaches every site that oracle names.
+        """
+        fx = FIXTURES["juiceshop_frontend"]
+        src = ROOT / fx["path"]
+        if not src.is_dir():
+            self.skipTest("juice-shop corpus not present")
+        facts, meta = run_query(src, "reachable",
+                                manifest_params("xss", "js", "reachable"), fx["lang"])
+        self.assertTrue(meta["query_meta"]["dataflow_overlay"])
+
+        import yaml
+        truth = yaml.safe_load(
+            (ROOT / "corpus" / "ground_truth" / "juiceshop.xss.yaml").read_text())
+        labelled = {s["sink"] for s in truth["sites"]}
+        reached = {f"{f['sink_file']}:{f['sink_line']}" for f in facts}
+        self.assertTrue(
+            labelled <= reached,
+            f"the substrate no longer reaches labelled site(s) {sorted(labelled - reached)}; "
+            f"reached {sorted(reached)}")
+
+        # Juice Shop marks two of these lines itself. If the annotation moves, the
+        # label is stale and the test should say so rather than quietly passing.
+        annotated = ROOT / fx["path"] / "search-result/search-result.component.ts"
+        lines = annotated.read_text().splitlines()
+        self.assertIn("localXssChallenge", lines[143],
+                      "search-result.component.ts:144 is no longer the line Juice Shop "
+                      "annotates — the ground truth needs re-reading, not re-pinning")
+
     def test_sanitizer_facts_join_with_reachable(self):
         """Both queries must agree on the (source, sink) pairs they describe."""
         fx = FIXTURES["webgoat"]

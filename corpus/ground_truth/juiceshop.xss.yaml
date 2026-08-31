@@ -1,0 +1,112 @@
+# Ground truth for the Juice Shop XSS case set — the oracle a hypothesizer is
+# scored against.
+#
+# THIS ORACLE IS NOT DERIVED FROM WHAT THE TOOL FOUND, which is the failure the
+# WebGoat path_traversal set was built with and which hid ProfileZipSlip — a
+# labelled lesson in that corpus — while every metric read 1.0. Juice Shop ships
+# three independent, project-authored sources and every label below was settled
+# against them plus the code at the cited line:
+#
+#   data/static/challenges.yml     116 challenges, 9 categorised [XSS]
+#   data/static/codefixes/         vulnerable and _correct variants, with reasons
+#   `// vuln-code-snippet vuln-line <key>`  line-precise markers in the source
+#
+# Scope: the 6 distinct sink sites the substrate reports on `frontend/src/app` at
+# the pinned commit. Paths are relative to THAT directory, because it is the CPG
+# root — writing them relative to `frontend/src` made every site read as one the
+# substrate never reached, which `score` reported rather than scoring zero quietly.
+# Across across 7 (source, sink) pairs — search-result:144 is reached
+# from two sources and is ONE site here, because `score` keys this file by sink.
+#
+# TEMPLATE SINKS ARE NOT IN THIS FILE. Twelve `[innerHTML]` bindings exist that no
+# query can reach — jssrc2cpg does not parse Angular templates, so the CPG holds
+# 147 files, exactly the .ts count. They are reported as LEADS at `static_pattern`
+# and no agent judges them, so there is nothing here to score them against. That
+# is a substrate ceiling, not a gap in this file.
+
+target: juiceshop
+commit: 1618a611b173b4bf114028e6e02549950606e29d
+class: xss
+language: js
+
+# vulnerable      untrusted input reaches a sink that writes markup; refuting it is
+#                 a false negative, the expensive error
+# not_this_class  the sink name matched something that does not render markup
+labels: [vulnerable, not_this_class]
+
+sites:
+  - sink: search-result/search-result.component.ts:144
+    sources: [queryParam, "route.snapshot.queryParams.q"]
+    challenge: [localXssChallenge, xssBonusChallenge]
+    label: vulnerable
+    why: >-
+      `this.searchValue = this.sanitizer.bypassSecurityTrustHtml(queryParam)` where
+      queryParam comes from the router's query string. The value is rendered by
+      search-result.component.html:11 as `[innerHTML]="searchValue"`. Juice Shop
+      marks this line itself with `vuln-code-snippet vuln-line localXssChallenge`.
+    discriminator: >-
+      The defence being bypassed is Angular's, and the bypass is explicit — this is
+      not a missing sanitizer but a deliberate opt-out of one that was working. The
+      sink's own name contains "SecurityTrust", which reads reassuringly and is the
+      opposite of what it does.
+
+  - sink: search-result/search-result.component.ts:111
+    sources: ["tableData[i].description"]
+    challenge: [restfulXssChallenge]
+    label: vulnerable
+    why: >-
+      Product descriptions from the REST API are passed through
+      bypassSecurityTrustHtml before rendering. A description is writable through
+      the API, so the payload arrives from storage rather than from this request.
+      Annotated `vuln-code-snippet vuln-line restfulXssChallenge`.
+
+  - sink: administration/administration.component.ts:74
+    sources: ["user.email"]
+    challenge: [persistedXssUserChallenge]
+    label: vulnerable
+    why: >-
+      `user.email` is interpolated into a template string with a `<span>` and the
+      whole thing bypassed. Email addresses are supplied at registration, so this
+      is stored XSS fired at an administrator viewing the user list.
+
+  - sink: administration/administration.component.ts:92
+    sources: ["feedback.comment"]
+    challenge: [persistedXssFeedbackChallenge]
+    label: vulnerable
+    why: >-
+      `feedback.comment` bypassed with no wrapper at all. Comments are user
+      submissions, so an administrator opening the feedback table executes them.
+
+  - sink: last-login-ip/last-login-ip.component.ts:40
+    sources: ["payload.data.lastLoginIp"]
+    challenge: [httpHeaderXssChallenge]
+    label: vulnerable
+    why: >-
+      The last-login IP is read out of a decoded JWT and interpolated into
+      `<small>...</small>` before the bypass. The IP is taken from a request header
+      the client sets, so the value is attacker-chosen despite arriving via a token
+      the server signed.
+    discriminator: >-
+      The taint enters through a signed JWT, which invites the reasoning that the
+      server vouched for it. It signed the token, not the header's contents.
+
+  - sink: track-result/track-result.component.ts:49
+    sources: ["results.data[0].orderId"]
+    challenge: [reflectedXssChallenge]
+    label: vulnerable
+    why: >-
+      The order id arrives as `route.snapshot.queryParams.id`, is sent to the
+      tracking API, and the echoed value is interpolated into `<code>...</code>`
+      and bypassed. Reflected, with the round trip through the server in between.
+    discriminator: >-
+      The value reaching the sink is an API RESPONSE field, so a reasoner tracking
+      only direct parameter-to-sink flow can conclude the data is server-owned.
+      The server is echoing what this request supplied.
+
+# NO NEGATIVES, and it is a real weakness of this set rather than an oversight.
+# Every site the substrate reports here is a genuine bug, so precision cannot fail
+# on this class any more than it can on WebGoat path_traversal, and the stub floor
+# will read 1.0. The `_correct.ts` variants in data/static/codefixes are the
+# obvious source of labelled negatives; they are not part of the analysed tree, so
+# using them means deciding how a fixture composes fixed and vulnerable variants of
+# the same file. Not done here.

@@ -656,5 +656,44 @@
         }
       }
     }
+  },
+  "juiceshop_frontend": {
+    "path": "corpus/juice-shop/frontend/src/app",
+    "lang": "JSSRC",
+    "note": "Juice Shop Angular frontend. The second real application and the first non-Java one. Root is frontend/src/app deliberately: a sibling assets/ holds a 12MB vendored three.js that made every query fail to compile against the CPG. Its ground truth comes from the project itself (challenges.yml, codefixes/, vuln-line markers), not from what this tool found.",
+    "rules": [
+      "js/xss"
+    ],
+    "queries": {
+      "reachable": {
+        "params": {
+          "annotations": [],
+          "calls": [
+            "getItem",
+            "get"
+          ],
+          "member_reads": [
+            "^.*route\\.snapshot\\.queryParams(\\..*)?$",
+            "^.*route\\.snapshot\\.params(\\..*)?$",
+            "^.*\\.queryParamMap(\\..*)?$",
+            "^.*location\\.(search|hash|href)$",
+            "^document\\.(URL|referrer|cookie)$",
+            "^window\\.name$"
+          ],
+          "sinks": [
+            "bypassSecurityTrustHtml",
+            "bypassSecurityTrustScript",
+            "bypassSecurityTrustResourceUrl",
+            "bypassSecurityTrustStyle",
+            "bypassSecurityTrustUrl",
+            "eval",
+            "write",
+            "insertAdjacentHTML"
+          ],
+          "full_name_filter": [],
+          "arg_index": "1"
+        }
+      }
+    }
   }
 }
