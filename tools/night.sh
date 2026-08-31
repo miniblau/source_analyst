@@ -44,6 +44,12 @@ set -uo pipefail   # deliberately NOT -e: a failing leg must not kill the queue
 
 src="${1:?source tree, e.g. corpus/webgoat}"; shift
 lang="${NIGHT_LANG:-java}"
+# The name the ground truth is filed under, which is NOT always the directory's.
+# `corpus/juice-shop/frontend/src/app` is one target's frontend and
+# `corpus/juice-shop/routes` its server, and both are scored against `juiceshop.*`
+# — deriving it from basename asked for `app.xss.yaml` and `routes.sqli.yaml`,
+# found neither, and recorded `score skipped` as though there were no oracle.
+target="${NIGHT_TARGET:-$(basename "$src")}"
 hyp_size="${NIGHT_HYP_SIZE:-4}"
 report_size="${NIGHT_REPORT_SIZE:-2}"
 trace_size="${NIGHT_TRACE_SIZE:-1}"
@@ -141,12 +147,12 @@ for c in "${classes[@]}"; do
   leg "$c" report tools/pass.sh report "$c" "$lang" "$report_size"
 
   # Deterministic tails: no model, so they run whatever the legs above did.
-  if render --class "$c" --target "$(basename "$src")" > "$outdir/$c.report.md" 2>"$outdir/$c.render.err"; then
+  if render --class "$c" --target "$target" > "$outdir/$c.report.md" 2>"$outdir/$c.render.err"; then
     note "$c" render ok "$outdir/$c.report.md"
   else
     note "$c" render FAILED "see $outdir/$c.render.err"
   fi
-  if score --class "$c" --target "$(basename "$src")" --src agent:hypothesize \
+  if score --class "$c" --target "$target" --src agent:hypothesize \
        > "$outdir/$c.scorecard.json" 2>"$outdir/$c.score.err"; then
     note "$c" score ok
   else
@@ -159,7 +165,7 @@ done
 # reports what the run actually produced, including classes a failed leg left
 # empty. summary.txt below is the operator's account of the RUN; this is the
 # reader's account of the FINDINGS, and they answer different questions.
-if overview --logs "$logdir" --target "$(basename "$src")" --reports . \
+if overview --logs "$logdir" --target "$target" --reports . \
      > "$outdir/overview.md" 2>"$outdir/overview.err"; then
   note "-" overview ok "$outdir/overview.md"
 else

@@ -44,6 +44,13 @@ import io.shiftleft.codepropertygraph.generated.nodes
 val annotations = strList("annotations")
 val calls = strList("calls")
 val receivers = strList("receivers")
+// The third source origin, as in reachable.sc. This query MUST select the same
+// sources as `reachable` or the two facts stop joining and every case loses its
+// sanitizer record — which is exactly what happened: this file was left out when
+// `member_reads` was added, so it threw "at least one of `annotations` or `calls`
+// is required" for every JavaScript class and no sanitizer fact was ever produced
+// for one. The failure was visible only in stderr nobody was reading.
+val memberReads = strList("member_reads")
 val sinks = strList("sinks")
 val fullNameFilter = strList("full_name_filter")
 val sanitizers = strList("sanitizers")
@@ -71,9 +78,9 @@ if (sinkGroups.forall(_.sinks.isEmpty))
     "sanitizer_on_path: `sinks` (or a non-empty `sink_groups`) is required")
 val maxPaths = str("max_paths", "500").toInt
 
-if (annotations.isEmpty && calls.isEmpty)
+if (annotations.isEmpty && calls.isEmpty && memberReads.isEmpty)
   throw new IllegalArgumentException(
-    "sanitizer_on_path: at least one of `annotations` or `calls` is required")
+    "sanitizer_on_path: at least one of `annotations`, `calls` or `member_reads` is required")
 if (sanitizers.isEmpty)
   throw new IllegalArgumentException("sanitizer_on_path: param `sanitizers` is required")
 
@@ -103,7 +110,13 @@ val sourceCalls: List[nodes.CfgNode] =
    else matchedCalls.filter(c => receivers.exists(r => receiverType(c).matches(r))))
     .collectAll[nodes.CfgNode].l
 
-val sourceNodes = annotatedParams ++ sourceCalls
+val memberNodes: List[nodes.CfgNode] =
+  if (memberReads.isEmpty) Nil
+  else cpg.call.name("<operator>.fieldAccess")
+         .filter(c => memberReads.exists(r => c.code.matches(r)))
+         .collectAll[nodes.CfgNode].l
+
+val sourceNodes = annotatedParams ++ sourceCalls ++ memberNodes
 
 def selectFor(g: SinkGroup) = {
   val calls = if (g.sinks.isEmpty) Nil else cpg.call.name(g.sinks*).l
