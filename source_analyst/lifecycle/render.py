@@ -333,6 +333,19 @@ def main(argv: list[str] | None = None) -> int:
               f" via {h.get('src','?')}</sub>\n")
         w("\n")
 
+    # Types carried by cases the run KEPT as live. A refuted case whose tainted
+    # argument has one of these types is excluded on something other than its type,
+    # whatever the prose says — derivable from the log, so the renderer owes it.
+    kept_arg_types: Counter = Counter()
+    for h in hyps:
+        if h.get("status") == "refuted":
+            continue
+        for fid in h.get("evidence", []):
+            f0 = by_id.get(fid, {})
+            if f0.get("sink_arg_type") and f0.get("sink_arg_type_resolved"):
+                kept_arg_types[f0["sink_arg_type"]] += 1
+                break
+
     if refuted:
         w("## Refuted during triage \u2014 verify these\n\n")
         w(f"The substrate found {len(refuted)} more tainted path(s) to a sink and the "
@@ -381,9 +394,30 @@ def main(argv: list[str] | None = None) -> int:
                   f"read \u2014 " + ", ".join(f"`{b}`" for b in bodies[:6])
                   + (f" and {len(bodies) - 6} more" if len(bodies) > 6 else "")
                   + ". This exclusion rests on the code, not on naming.\n")
-            elif arg_type and resolved:
+            elif arg_type and resolved and arg_type not in kept_arg_types:
                 w(f"  **Basis:** the tainted argument is `{arg_type}` \u2014 a resolved "
-                  f"type, so this exclusion does not rest on naming.\n")
+                  f"type, and no case kept as live in this run carries it, so this "
+                  f"exclusion does not rest on naming.\n")
+            elif arg_type and resolved:
+                # A RESOLVED TYPE IS NOT AUTOMATICALLY A DISCRIMINATING ONE, and this
+                # branch exists because the renderer said it was. On the open_redirect
+                # pair both the live case and the excluded one carry
+                # `java.lang.String` — it is the type the class expects — and the
+                # report told a reviewer the exclusion "does not rest on naming" when
+                # the type supported nothing at all. The prose it was vouching for
+                # argued the bug was real.
+                #
+                # Which types discriminate is vuln knowledge and does not belong in
+                # this file. It does not have to: a type carried by cases kept as LIVE
+                # in the same run demonstrably fails to separate this one from them,
+                # and that is derivable from the log.
+                n = kept_arg_types[arg_type]
+                w(f"  **Basis:** none that this renderer can confirm. The tainted "
+                  f"argument is `{arg_type}`, resolved \u2014 but {n} case(s) kept as "
+                  f"live in this run carry that same type, so it does not separate "
+                  f"this one from them. A resolved type supports an exclusion only "
+                  f"when the type *cannot* carry what the class describes. Read the "
+                  f"reasoning above on its own merits.\n")
             else:
                 w("  **Basis:** call site only \u2014 the callee's implementation was "
                   "never examined and its argument type is "

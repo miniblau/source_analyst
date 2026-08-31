@@ -505,6 +505,61 @@ class TestRenderSummary(unittest.TestCase):
         self.assertNotIn("Refuted during triage", self.render())
 
 
+class TestRefutationBasis(unittest.TestCase):
+    """A RESOLVED type is not automatically a DISCRIMINATING one.
+
+    The renderer used to vouch for any exclusion whose tainted argument had a
+    resolved type: "a resolved type, so this exclusion does not rest on naming".
+    On the open_redirect pair both the live case and the excluded one carry
+    `java.lang.String` — the type the class expects — so the type supported
+    nothing, and the report vouched for prose that argued the bug was real.
+
+    Which types discriminate is vuln knowledge and stays out of the renderer. It
+    does not need it: a type also carried by cases KEPT AS LIVE in the same run
+    demonstrably fails to separate this one from them, and that is in the log.
+    """
+
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(self.tmp.cleanup)
+        self.log = Path(self.tmp.name) / "log.jsonl"
+        self.env = dict(os.environ, SOURCE_ANALYST_LOG=str(self.log))
+
+    def render(self, refuted_type, kept_type):
+        kept_flow = flow_fact(sink_arg_type=kept_type, sink_arg_type_resolved=True,
+                              source_name="kept")
+        ref_flow = flow_fact(sink_arg_type=refuted_type, sink_arg_type_resolved=True,
+                             source_name="ref", sink_line=44)
+        recs = [kept_flow, ref_flow,
+                records.record("hypothesis",
+                               {"statement": "s", "vuln_class": "sqli",
+                                "status": "needs_proof", "confidence": 0.8,
+                                "evidence": [kept_flow["id"]]}, src="agent:hypothesize"),
+                records.record("hypothesis",
+                               {"statement": "s", "vuln_class": "sqli",
+                                "status": "refuted", "confidence": 0.9,
+                                "reasoning": "not a database call",
+                                "evidence": [ref_flow["id"]]}, src="agent:hypothesize")]
+        self.log.write_text("".join(json.dumps(r) + "\n" for r in recs))
+        out = subprocess.run([sys.executable, "-m", "source_analyst.lifecycle.render",
+                              "--class", "sqli", "--target", "t"],
+                             capture_output=True, text=True, env=self.env, cwd=ROOT)
+        self.assertEqual(out.returncode, 0, out.stderr)
+        return out.stdout
+
+    def test_a_type_the_live_cases_also_carry_vouches_for_nothing(self):
+        out = self.render("java.lang.String", "java.lang.String")
+        self.assertIn("none that this renderer can confirm", out)
+        self.assertIn("does not separate this one", out)
+        self.assertNotIn("does not rest on naming", out)
+
+    def test_a_type_no_live_case_carries_does_vouch(self):
+        out = self.render("org.springframework.web.multipart.MultipartFile",
+                          "java.lang.String")
+        self.assertIn("does not rest on naming", out)
+        self.assertNotIn("none that this renderer can confirm", out)
+
+
 class TestRenderHonesty(unittest.TestCase):
     """Limits that are properties of the engine are stated by the renderer, not
     requested of an agent. Asking produced 0 mentions across 23 real findings."""
