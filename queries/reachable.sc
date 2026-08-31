@@ -214,8 +214,18 @@ val rows = grouped.toList.flatMap { case (_, entries) =>
     "source_origin"   -> (srcNode match {
                             case _: nodes.MethodParameterIn => "annotation"
                             case _                          => "call" }),
+    // A member read's call NAME is `<operator>.fieldAccess` for every one of them,
+    // so naming it that makes two different sources at one sink indistinguishable —
+    // and `brief` keys a case on (sink, source_name), so one of them is dropped.
+    // Measured on Juice Shop: login.ts:34 is reached from `req.body.email` AND
+    // `req.body.password`, and collapsing them kept the PASSWORD — the argument
+    // that goes through security.hash() — while discarding the email, which is the
+    // actual injection vector. The surviving case showed the defended source.
+    // So a field access is named by its code; anything else keeps its own name.
     "source_name"     -> (srcNode match {
                             case p: nodes.MethodParameterIn => p.name
+                            case c: nodes.Call if c.name == "<operator>.fieldAccess"
+                                                            => clip(c.code, 120)
                             case c: nodes.Call              => c.name
                             case _                          => "" }),
     "source_marker"   -> srcAnnotations,

@@ -1,0 +1,61 @@
+# Ground truth for the Juice Shop server-side SQLi case set.
+#
+# Labels come from the project, not from what this tool found: `challenges.yml`
+# names them and the source carries `// vuln-code-snippet vuln-line <key>` markers
+# on the exact lines. Both sites below are annotated by Juice Shop itself.
+#
+# WHAT THIS SET IS FOR. `manifests/patterns/js/sqli.yaml` existed for days with no
+# corpus behind it — validated only against a 25-line fixture written by hand
+# alongside it, which proves a manifest matches the code its author was picturing
+# and nothing else. This is the first real Express application it has met.
+#
+# Scope: the 2 distinct sink sites the substrate reports on `routes/` at the pinned
+# commit, across 4 (source, sink) pairs — login.ts:34 is reached from two request
+# fields and is ONE site here, because `score` keys this file by sink. Paths are
+# relative to `routes/`, the CPG root.
+
+target: juiceshop
+commit: 1618a611b173b4bf114028e6e02549950606e29d
+class: sqli
+language: js
+
+labels: [vulnerable, not_this_class]
+
+sites:
+  - sink: login.ts:34
+    sources: ["req.body.email", "req.body.password"]
+    challenge: [loginAdminChallenge, loginBenderChallenge, loginJimChallenge]
+    label: vulnerable
+    why: >-
+      `models.sequelize.query()` with a template literal interpolating
+      `req.body.email` directly into a WHERE clause. Authentication bypass: the
+      email field closes the quote and comments out the password test, which is
+      what the three login challenges ask for.
+    discriminator: >-
+      The password side of the same statement is interpolated through
+      `security.hash(...)`, so ONE of the two sources on this line reaches the SQL
+      already digested to hex and the other does not. A reasoner that sees a
+      hashing call on the path and treats the line as defended gets it backwards —
+      the defence is on the argument that was never the way in.
+
+  - sink: search.ts:23
+    sources: ["req.query.q"]
+    challenge: [unionSqlInjectionChallenge, dbSchemaChallenge]
+    label: vulnerable
+    why: >-
+      `req.query.q` is interpolated into two LIKE clauses of a raw
+      `models.sequelize.query()`. Nothing escapes it; the only handling is a
+      200-character truncation, which bounds the payload without changing that it
+      is parsed as SQL.
+    discriminator: >-
+      There IS input handling on this path — a ternary against the string
+      'undefined', a null-coalesce, and `substring(0, 200)` — so a sanitizer
+      candidate may well appear on the flow. None of it escapes a quote. Length
+      limits and default values read like validation and defend nothing here.
+
+# NO NEGATIVES. Both reported sites are real, so precision cannot fail on this set
+# either — the same weakness as juiceshop.xss and webgoat.path_traversal. Juice
+# Shop uses the Sequelize ORM for most queries, whose parameterised paths would be
+# the natural negatives; they do not currently appear as flows because the ORM's
+# own methods are not in the sink list, so including them would mean deciding
+# whether an ORM call is a sink at all. Not decided here.

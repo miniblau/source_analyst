@@ -523,6 +523,35 @@ class TestGolden(unittest.TestCase):
                       "search-result.component.ts:144 is no longer the line Juice Shop "
                       "annotates — the ground truth needs re-reading, not re-pinning")
 
+    def test_server_side_js_reaches_its_labelled_sites(self):
+        """js/sqli against a real Express app, not the fixture written beside it.
+
+        A manifest validated only against a fixture its own author wrote proves the
+        patterns match the code he was picturing. These are Juice Shop's routes,
+        and the two sites are the ones Juice Shop annotates itself.
+        """
+        fx = FIXTURES["juiceshop_routes"]
+        src = ROOT / fx["path"]
+        if not src.is_dir():
+            self.skipTest("juice-shop corpus not present")
+        facts, meta = run_query(src, "reachable",
+                                manifest_params("sqli", "js", "reachable"), fx["lang"])
+        self.assertTrue(meta["query_meta"]["dataflow_overlay"])
+
+        reached = {f"{f['sink_file']}:{f['sink_line']}" for f in facts}
+        for site in ("login.ts:34", "search.ts:23"):
+            self.assertIn(site, reached, f"lost the annotated site {site}")
+
+        # Both request fields on the login line must survive as SEPARATE sources.
+        # They collapsed into one when a member read was named by its call name —
+        # every one of them is `<operator>.fieldAccess` — and `brief` keys a case on
+        # (sink, source_name), so one was dropped. The survivor was `req.body.password`,
+        # which passes through security.hash(): the report showed the DEFENDED
+        # argument and discarded the injection vector.
+        login_sources = {f["source_name"] for f in facts if f["sink_file"] == "login.ts"}
+        self.assertIn("req.body.email", login_sources)
+        self.assertIn("req.body.password", login_sources)
+
     def test_sanitizer_facts_join_with_reachable(self):
         """Both queries must agree on the (source, sink) pairs they describe."""
         fx = FIXTURES["webgoat"]

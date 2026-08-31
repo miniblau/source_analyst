@@ -91,9 +91,22 @@ def receiverType(c: nodes.Call): String = c.receiver.headOption match {
   case _                                => ""
 }
 
+// Member reads, e.g. `req.query.name`. A THIRD origin, because the first two are
+// Java-shaped: Java hands over an annotated parameter or a named call, Express and
+// Angular hand over a property. Adding the parameter here without the matching was
+// its own small lesson — the inventory reported ZERO sources for a class whose
+// sources are all member reads, while `reachable` found flows from them, so the one
+// query whose job is telling "no sources" apart from "sources unparsed" said the
+// first when the truth was neither.
+val memberCalls: List[nodes.Call] =
+  if (memberReads.isEmpty) Nil
+  else cpg.call.name("<operator>.fieldAccess")
+         .filter(c => memberReads.exists(r => c.code.matches(r))).l
+
 val selectedCalls =
-  if (receivers.isEmpty) matchedCalls
-  else matchedCalls.filter(c => receivers.exists(r => receiverType(c).matches(r)))
+  (if (receivers.isEmpty) matchedCalls
+   else matchedCalls.filter(c => receivers.exists(r => receiverType(c).matches(r)))
+  ) ++ memberCalls
 
 val callRows = selectedCalls.map { c =>
   ujson.Obj(
@@ -101,7 +114,11 @@ val callRows = selectedCalls.map { c =>
     "origin"        -> "call",
     "subject"       -> c.method.fullName,
     "object"        -> c.methodFullName,
-    "name"          -> c.name,
+    // Same reason as reachable.sc: every member read is called
+    // `<operator>.fieldAccess`, so the name distinguishes nothing and the sorted
+    // output cannot even be read as an inventory. Name a field access by its code.
+    "name"          -> (if (c.name == "<operator>.fieldAccess") clip(c.code, 120)
+                        else c.name),
     "code"          -> clip(c.code),
     "file"          -> c.location.filename,
     "line"          -> c.lineNumber.map(_.toInt).getOrElse(-1),

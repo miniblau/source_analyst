@@ -695,5 +695,33 @@
         }
       }
     }
+  },
+  "juiceshop_routes": {
+    "path": "corpus/juice-shop/routes",
+    "lang": "JSSRC",
+    "note": "Juice Shop Express routes - the first real server-side JavaScript. js/sqli.yaml had existed for days validated only against a 25-line fixture written beside it. Ground truth is the project's own vuln-code-snippet markers.",
+    "queries": {
+      "reachable": {
+        "params": {
+          "annotations": [],
+          "calls": [],
+          "member_reads": [
+            "^req\\.(query|body|params|headers|cookies)(\\..*)?$",
+            "^request\\.(query|body|params|headers|cookies)(\\..*)?$",
+            "^ctx\\.(query|request|params)(\\..*)?$"
+          ],
+          "sinks": [
+            "query",
+            "raw",
+            "exec",
+            "execute",
+            "run",
+            "all"
+          ],
+          "full_name_filter": [],
+          "arg_index": "1"
+        }
+      }
+    }
   }
 }
