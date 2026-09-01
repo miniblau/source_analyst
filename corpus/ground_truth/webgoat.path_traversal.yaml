@@ -173,3 +173,13 @@ sites:
       `new File(catPicturesDirectory, (id == null ? RandomUtils.nextInt(1,11) : id) + ".jpg")`
       builds the path from the `id` request parameter; lines 108 and 117 then probe
       and list it. Same root cause as those two sites, at the construction point.
+    discriminator: >-
+      THE TERNARY IS THE TRAP, and it has caught two different runs. The random
+      number applies only when `id` is ABSENT; when the parameter is supplied it is
+      used directly, so the randomisation defends nothing about the case that
+      matters. Observed refutations: "the sink name 'init' is not a filesystem
+      operation" (before constructor sinks were briefed readably), and then "the
+      tainted value is used in a conditional expression that defaults to a random
+      number if null. This randomization prevents the path from being directly
+      controlled by the user". Both wrong, for different reasons, at confidence
+      0.9. A default value is not a constraint on the supplied one.
