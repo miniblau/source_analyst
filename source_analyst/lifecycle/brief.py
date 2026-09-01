@@ -54,6 +54,30 @@ def _slim_steps(steps: list[dict]) -> list[dict]:
     return out
 
 
+def _sink_display(name: str, full_name: str) -> str:
+    """A sink name an agent can reason about.
+
+    Joern calls every constructor `<init>`, which names nothing. Measured on run 1:
+    a LABELLED VULNERABLE site — ProfileUploadRetrieval.java:101, `new File(dir, id
+    + ".jpg")` — was refuted at 0.9 with "the sink name 'init' is not a filesystem
+    operation like createNewFile or exists". A false negative, the expensive error,
+    produced by handing the agent a token that carries no meaning while the code
+    beside it read `new File(...)`.
+
+    Constructor sinks arrived with the fix for path_traversal's overfitting, so
+    this is that fix's cost, and it is the briefing's to pay: `java.io.File.<init>`
+    becomes `new File`. That is a faithful rendering of the resolved name, not an
+    invention — and when the frontend did not resolve it there is nothing to render
+    and the raw name stays, because inventing a class there would be a guess.
+    """
+    if name != "<init>":
+        return name
+    owner = (full_name or "").split(".<init>")[0]
+    if not owner or "unresolved" in owner.lower():
+        return name
+    return "new " + owner.split(".")[-1]
+
+
 def _key(f: dict) -> tuple:
     return tuple(f.get(k) for k in CASE_KEY)
 
@@ -104,7 +128,12 @@ def _cases(log: list[dict]) -> list[dict]:
                 "method": flow.get("subject"),
             },
             "sink": {
-                "name": flow.get("sink_name"), "full_name": flow.get("sink_full_name"),
+                "name": _sink_display(flow.get("sink_name", ""),
+                                      flow.get("sink_full_name", "")),
+                # The raw CPG name is kept so nothing is hidden: `name` is what the
+                # call is, `cpg_name` is what the graph called it.
+                "cpg_name": flow.get("sink_name"),
+                "full_name": flow.get("sink_full_name"),
                 "code": flow.get("sink_code"), "arg_code": flow.get("sink_arg_code"),
                 # The static type of the tainted argument, and whether the frontend
                 # actually resolved it. Sinks are matched on a short name, so this is

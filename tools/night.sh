@@ -117,6 +117,25 @@ for c in "${classes[@]}"; do
       note "$c" "facts:$q" FAILED "see $outdir/$c.facts.err"
     fi
   done
+
+  # THE PATTERN SUBSTRATE, which this stage did not run at all until now. Four of
+  # five pattern files declare `rules:` and nothing consumed them: measured across
+  # both directories of the first full run, ZERO opengrep facts in any class, ever.
+  # So every report ever produced here was CPG-only while the manifests claimed two
+  # substrates, and the LEADS section — sinks no query can reach, the whole reason
+  # the stitching exists — never had a fact to render. Its absence read as "there
+  # were none". Juice Shop's twelve `[innerHTML]` bindings are the standing example.
+  for rs in $(manifest show --class "$c" --lang "$lang" 2>/dev/null \
+              | python3 -c 'import json,sys
+try: print(" ".join(json.load(sys.stdin).get("rules") or []))
+except Exception: pass'); do
+    if struct_grep scan --src "$src" --rules "$rs" 2>>"$outdir/$c.facts.err" \
+       | belief append >/dev/null 2>>"$outdir/$c.facts.err"; then
+      note "$c" "rules:$rs" ok
+    else
+      note "$c" "rules:$rs" FAILED "see $outdir/$c.facts.err"
+    fi
+  done
 done
 
 # ---- then the model legs, class by class ----------------------------------

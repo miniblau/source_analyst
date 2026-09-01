@@ -552,6 +552,30 @@ class TestGolden(unittest.TestCase):
         self.assertIn("req.body.email", login_sources)
         self.assertIn("req.body.password", login_sources)
 
+    def test_a_constructor_sink_is_briefed_readably(self):
+        """`<init>` names nothing, and an agent refuted a real bug over it.
+
+        Run 1, path_traversal ProfileUploadRetrieval.java:101 — a labelled
+        vulnerable site, `new File(dir, id + ".jpg")` — came back refuted at 0.9
+        with "the sink name 'init' is not a filesystem operation like createNewFile
+        or exists". Recall fell to 0.941. Joern calls every constructor `<init>`,
+        so the briefing was handing over a token with no meaning while `sink_code`
+        beside it read `new File(...)`.
+
+        Rendering the resolved owner is faithful, not inventive — and when the
+        frontend resolved nothing there is nothing to render, so the raw name
+        stays rather than a guess being made.
+        """
+        from source_analyst.lifecycle.brief import _sink_display
+        self.assertEqual(
+            _sink_display("<init>", "java.io.File.<init>:void(java.io.File,java.lang.String)"),
+            "new File")
+        self.assertEqual(_sink_display("createNewFile", "java.io.File.createNewFile"),
+                         "createNewFile")
+        # Unresolved: no owner to name, so do not invent one.
+        self.assertEqual(_sink_display("<init>", "<unresolvedNamespace>.<init>"), "<init>")
+        self.assertEqual(_sink_display("<init>", ""), "<init>")
+
     def test_sanitizer_facts_join_with_reachable(self):
         """Both queries must agree on the (source, sink) pairs they describe."""
         fx = FIXTURES["webgoat"]

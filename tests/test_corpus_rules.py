@@ -234,6 +234,41 @@ class TestUntrustworthyScan(unittest.TestCase):
         self.assertIn("no files were scanned", proc.stderr)
 
 
+class TestPipelineRunsBothSubstrates(unittest.TestCase):
+    """A rule set nothing invokes is a rule set that does not exist.
+
+    Four of five pattern files declared `rules:` and `night.sh`'s facts stage ran
+    only the four CPG queries, so across BOTH directories of the first full run
+    there were zero opengrep facts in any class. Every report was CPG-only while
+    the manifests claimed two substrates, and the leads section — sinks no query
+    can reach — never had a fact to render. Its absence read as "there were none".
+    """
+
+    def test_night_facts_stage_invokes_declared_rule_sets(self):
+        night = (ROOT / "tools" / "night.sh").read_text()
+        self.assertIn("struct_grep scan", night,
+                      "the facts stage does not run the pattern substrate at all, so "
+                      "every `rules:` declaration in every manifest is inert")
+        # And it must be driven by what the manifest declares, not a fixed list —
+        # a hardcoded rule set would go stale the moment a class added one.
+        self.assertIn("manifest show", night)
+
+    def test_every_declared_rule_set_exists(self):
+        """A `rules:` entry naming a file that is not there fails only at run time."""
+        from source_analyst.manifest.loader import available_classes, load_patterns
+        from source_analyst.struct_grep import rules as rulemod
+        have = set(rulemod.available())
+        for vc in available_classes():
+            for lang in ("java", "js"):
+                try:
+                    pats = load_patterns(vc, lang)
+                except Exception:
+                    continue
+                for rs in pats.rules:
+                    self.assertIn(rs, have,
+                                  f"{lang}/{vc} declares rule set {rs!r}, which does not exist")
+
+
 class TestVocabulary(unittest.TestCase):
     def test_rule_sets_are_listed(self):
         from source_analyst.struct_grep import rules
