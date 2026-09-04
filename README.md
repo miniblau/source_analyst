@@ -149,11 +149,18 @@ tools/trace.sh /path/to/project sqli java 1
 tools/trace.sh /path/to/project sqli java 1 refuted   # re-examine the exclusions
 ```
 
-**Batch size 1**, not 4 — a trace briefing carries method source and runs ~10k tokens
-per case against a hypothesize batch's ~4k. `brief` prints `bytes` in its run meta;
-budget against **~2.3 chars per token**, not 4, because source and fully-qualified
-identifiers tokenize far worse than prose. Getting this wrong is a batch that dies
-mid-record on the context limit.
+**Batch size 1**, not 4 — and the reason is generation time, not context. `brief`
+prints `bytes` in its run meta; divide by **~3.8 chars per token**, measured on the
+server's own tokenizer across five real briefings (3.77-3.90, hypothesize and trace,
+Java and TypeScript). Budget the slot for prompt *plus* output: a batch that dies
+mid-record has usually run past the limit on what it generated, not on what it read.
+
+Raising the batch size does not make a run faster. Per-case seconds are flat in
+batch size — hypothesize 130/109/201/139s at 1/2/3/4 cases, report 312/305s at 1/2
+— because generation dominates and generation is per-case work. Trace at 4 was tried
+and blew the 1800s timeout with a briefing that fitted the context easily, dropping
+four cases having admitted nothing. What batching does change is the blast radius of
+a refusal.
 
 **Re-examining exclusions, and when to.** Everything `trace` drops lands in the
 report's "Refuted — verify these" section. Entries flagged **Check this one** are
