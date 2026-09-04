@@ -78,6 +78,11 @@ set -uo pipefail   # deliberately NOT -e: a failing leg must not kill the queue
 #
 # `ensure_server` now reaps other workspaces on the way up; this trap closes the
 # other half, so an overnight run leaves the box as it found it.
+#
+# `--all`, not `--src`, because a run may build several trees. The consequence is
+# that two night.sh runs in parallel will stop each other's server — this is an
+# unattended single-run driver and the memory it is protecting does not admit two
+# anyway, so that is the correct trade rather than an oversight.
 trap 'cpg stop --all >/dev/null 2>&1 || true' EXIT
 
 src="${1:?source tree, e.g. corpus/webgoat}"; shift
