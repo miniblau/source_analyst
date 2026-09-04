@@ -455,6 +455,50 @@ class TestGolden(unittest.TestCase):
         for control in ("/safe", "/all"):
             self.assertNotIn(control, subjects)
 
+    def test_juiceshop_codefixes_negatives_stay_dark(self):
+        """Two-sided, on negatives this repo did not write.
+
+        Every other control in corpus/fixtures/ was authored by whoever wrote the
+        query it tests, which proves a query matches the code its author was
+        picturing and nothing else. These are Juice Shop's own `_correct` variants
+        — the fix its maintainers shipped — paired with their vulnerable siblings.
+
+        The two sides are not equally strong and the assertions say so. The sqli
+        pairs keep the SAME sink (`models.sequelize.query`) and the SAME source
+        (`req.query.q`) and differ only in binding, so name-matching alone cannot
+        pass them. The xss pairs delete the sink in the fix, so they test that the
+        query fires on the sink rather than the surrounding shape — a weaker claim,
+        and one this test must not overstate.
+        """
+        fx = FIXTURES["js_juiceshop_codefixes"]
+        src = ROOT / fx["path"]
+        if not src.is_dir():
+            self.skipTest("juiceshop codefixes fixture not present")
+
+        # Through _check, so the bytes are golden-locked as well as asserted.
+        def files_hit(query):
+            facts, meta = self._check("js_juiceshop_codefixes", query)
+            return {f.get("sink_file") or f.get("file") for f in facts}, meta
+
+        # sqli: dataflow, and ONLY dataflow, separates these.
+        hit, meta = files_hit("reachable")
+        self.assertTrue(meta["query_meta"]["dataflow_overlay"],
+                        "no dataflow overlay — an empty negative would prove nothing")
+        self.assertEqual(hit, {"src/dbSchemaChallenge_1.ts",
+                               "src/unionSqlInjectionChallenge_1.ts"})
+
+        # xss: the fixed variants drop the bypassSecurityTrust* call entirely.
+        hit_xss, _ = files_hit("sql_sinks")
+        self.assertEqual(hit_xss, {"src/localXssChallenge_1.ts",
+                                   "src/restfulXssChallenge_3.ts",
+                                   "src/xssBonusChallenge_2.ts"})
+
+        # The property that outlives any particular query: a fix somebody else
+        # wrote never shows up, on either side.
+        for query, hit in (("reachable", hit), ("sql_sinks", hit_xss)):
+            self.assertFalse([f for f in hit if "_correct" in f],
+                             f"{query} fired on a file Juice Shop calls fixed: {hit}")
+
     def test_a_lead_is_not_a_clean_result(self):
         """`render` must distinguish "nothing looked" from "we looked, found nothing".
 

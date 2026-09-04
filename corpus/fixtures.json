@@ -723,5 +723,57 @@
         }
       }
     }
+  },
+  "js_juiceshop_codefixes": {
+    "path": "corpus/fixtures/js_juiceshop_codefixes",
+    "lang": "JSSRC",
+    "note": "negatives THIS repo did not write: Juice Shop's own `_correct` codefix variants paired with their vulnerable siblings. sqli is the strong form (same sink, same source, only dataflow separates bound from interpolated); xss is the near-miss form (the fix deletes the sink), which is weaker and must not be read as equivalent. See the fixture README.",
+    "queries": {
+      "sql_sinks": {
+        "params": {
+          "sinks": [
+            "bypassSecurityTrustHtml",
+            "bypassSecurityTrustScript",
+            "bypassSecurityTrustResourceUrl",
+            "bypassSecurityTrustStyle",
+            "bypassSecurityTrustUrl"
+          ],
+          "full_name_filter": [],
+          "arg_index": "1"
+        }
+      },
+      "request_sources": {
+        "params": {
+          "annotations": [],
+          "calls": [],
+          "member_reads": [
+            "^req\\.(query|body|params|headers|cookies)(\\..*)?$",
+            "^request\\.(query|body|params|headers|cookies)(\\..*)?$",
+            "^ctx\\.(query|request|params)(\\..*)?$"
+          ]
+        }
+      },
+      "reachable": {
+        "params": {
+          "annotations": [],
+          "calls": [],
+          "member_reads": [
+            "^req\\.(query|body|params|headers|cookies)(\\..*)?$",
+            "^request\\.(query|body|params|headers|cookies)(\\..*)?$",
+            "^ctx\\.(query|request|params)(\\..*)?$"
+          ],
+          "sinks": [
+            "query",
+            "raw",
+            "exec",
+            "execute",
+            "run",
+            "all"
+          ],
+          "full_name_filter": [],
+          "arg_index": "1"
+        }
+      }
+    }
   }
 }
