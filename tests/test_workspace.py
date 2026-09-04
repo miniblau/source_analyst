@@ -194,3 +194,67 @@ class TestReapOthers(unittest.TestCase):
         idle.mkdir()  # built but never served
         with unittest.mock.patch.object(server, "stop", return_value=True):
             self.assertEqual(server.reap_others(mine), [])
+
+
+class TestEmptyCpgIsNotABuild(unittest.TestCase):
+    """A frontend that parsed nothing must not produce a cached, successful build.
+
+    Measured 2026-09-04: two Juice Shop `codefixes/*.ts` snippets are spliced
+    fragments with one unclosed brace; jssrc2cpg emitted a 4,660-byte CPG holding
+    zero files, said nothing on stderr and exited 0. Every later query would then
+    answer "0 facts" honestly and the run would read as a clean bill of health for
+    code nobody parsed — permanently, because cpg.bin was cached. No Joern here:
+    the frontend and the counter are both stubbed, the assertions are about what
+    build() leaves on disk.
+    """
+
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(self.tmp.cleanup)
+        self.root = Path(self.tmp.name) / "ws"
+        self.root.mkdir()
+        self.ws = workspace.Workspace(src=Path("/src"), source_hash="h" * 64, root=self.root)
+
+    def _build(self, files: int, methods: int = 0):
+        from source_analyst.cpg import server
+
+        def fake_run(cmd, **kw):
+            (self.root / "cpg.bin.tmp").write_bytes(b"x")
+            return unittest.mock.Mock(returncode=0)
+
+        with unittest.mock.patch.object(server.subprocess, "run", fake_run), \
+             unittest.mock.patch.object(server, "joern_version", return_value="4.0.0"), \
+             unittest.mock.patch.object(server, "is_running", return_value=False), \
+             unittest.mock.patch.object(server, "stop", return_value=True), \
+             unittest.mock.patch.object(server, "_cpg_counts", return_value=(files, methods)):
+            return server.build(self.ws, language="JSSRC")
+
+    def test_zero_files_raises_and_caches_nothing(self):
+        with self.assertRaises(SystemExit) as cm:
+            self._build(files=0)
+        self.assertIn("EMPTY CPG", str(cm.exception))
+        self.assertFalse(self.ws.cpg_bin.exists(), "an empty CPG must not be cached")
+        self.assertFalse(self.ws.meta_json.exists(), "a failed build must leave no meta")
+        self.assertFalse(self.ws.is_built())
+
+    def test_a_real_build_records_what_was_parsed(self):
+        self.assertTrue(self._build(files=4, methods=40))
+        self.assertTrue(self.ws.is_built())
+        meta = self.ws.read_meta()
+        self.assertEqual((meta["cpg_files"], meta["cpg_methods"]), (4, 40))
+
+    def test_an_uncountable_cpg_is_a_failure_not_a_zero(self):
+        """No marker back means "unknown", and unknown must not be read either way."""
+        from source_analyst.cpg import server
+
+        with unittest.mock.patch.object(server, "run_scala", return_value="no marker here"):
+            with self.assertRaises(SystemExit) as cm:
+                server._cpg_counts(self.ws)
+        self.assertIn("must not be assumed", str(cm.exception))
+
+    def test_counts_are_read_from_the_repl_value_echo(self):
+        from source_analyst.cpg import server
+
+        echo = 'val res0: String = "CPGCOUNTS 320 2756"\n'
+        with unittest.mock.patch.object(server, "run_scala", return_value=echo):
+            self.assertEqual(server._cpg_counts(self.ws), (320, 2756))

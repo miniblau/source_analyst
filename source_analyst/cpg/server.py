@@ -94,19 +94,79 @@ def build(
     if proc.returncode != 0 or not tmp.is_file():
         raise SystemExit(f"cpg: build failed (exit {proc.returncode}); see {ws.build_log}")
     tmp.replace(ws.cpg_bin)
-    ws.write_meta(
-        {
-            "source": str(ws.src),
-            "source_hash": ws.source_hash,
-            "language": language or "auto",
-            "frontend_args": fargs,
-            "joern_version": joern_version(),
-            "built_at": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
-            "build_seconds": round(time.time() - started, 1),
-        }
-    )
-    log(f"built {ws.cpg_bin} in {round(time.time() - started, 1)}s")
+
+    # A frontend that parsed NOTHING still exits 0 and still writes a graph.
+    # Measured 2026-09-04 on two Juice Shop `codefixes/*.ts` snippets, which are
+    # spliced fragments with one unclosed brace: jssrc2cpg emitted a 4,660-byte
+    # CPG holding zero files, said nothing on stderr, and returned success. The
+    # same tree minus those two files produced 60KB and parsed fine.
+    #
+    # Left alone that is the worst failure this system can have. Every later query
+    # answers "0 facts" honestly, `brief` finds no cases, the report is empty, and
+    # the whole run reads as a clean bill of health for code nobody ever parsed —
+    # and because cpg.bin was cached, it would read that way on every future run
+    # too. So the empty CPG is deleted rather than cached, and the build fails.
+    meta = {
+        "source": str(ws.src),
+        "source_hash": ws.source_hash,
+        "language": language or "auto",
+        "frontend_args": fargs,
+        "joern_version": joern_version(),
+        "built_at": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
+        "build_seconds": round(time.time() - started, 1),
+    }
+    # Written before counting because counting needs a server, and `ensure_server`
+    # refuses to start for a workspace that is not `is_built()` — which is cpg.bin
+    # AND meta.json. Both are removed again if the count comes back empty.
+    ws.write_meta(meta)
+
+    files, methods = _cpg_counts(ws)
+    if files == 0:
+        stop(ws)
+        ws.cpg_bin.unlink(missing_ok=True)
+        ws.meta_json.unlink(missing_ok=True)
+        raise SystemExit(
+            f"cpg: build produced an EMPTY CPG for {ws.src} (0 files, 0 methods) — "
+            f"the frontend exited 0 but parsed nothing, so this is a frontend or "
+            f"source problem, NOT a codebase with no vulnerabilities. Check that "
+            f"--lang matches the tree and that the sources parse standalone; "
+            f"see {ws.build_log}. The empty CPG was discarded, not cached."
+        )
+
+    # Recorded so `cpg status` can show what was actually parsed. A tree whose file
+    # count is far below what you expected is the partial-parse case: not empty, so
+    # not fatal, but not the whole codebase either.
+    meta["cpg_files"] = files
+    meta["cpg_methods"] = methods
+    ws.write_meta(meta)
+    log(f"built {ws.cpg_bin} in {round(time.time() - started, 1)}s "
+        f"({files} files, {methods} methods)")
     return True
+
+
+COUNTS = re.compile(r"CPGCOUNTS (\d+) (\d+)")
+
+
+def _cpg_counts(ws: Workspace) -> tuple[int, int]:
+    """(files, methods) in the built CPG, via the server.
+
+    REPL stdout is diagnostics, not a success signal (see `run_scala`), so the
+    marker must be found and parsed or this raises. Reading a missing marker as
+    "zero" would fail an otherwise good build; reading it as "fine" would restore
+    exactly the silence this exists to break.
+    """
+    # An EXPRESSION, not a println: what comes back is the REPL's value echo
+    # (`val res0: String = "CPGCOUNTS 4 40"`), the same way `overlays` reads its
+    # answer. A println's side-effect output does not reach this stdout at all.
+    out = run_scala(ws, 's"CPGCOUNTS ${cpg.file.size} ${cpg.method.size}"')
+    m = COUNTS.search(out)
+    if not m:
+        raise SystemExit(
+            f"cpg: could not count the CPG just built for {ws.src} — the server "
+            f"answered without the marker, so whether it parsed anything is "
+            f"unknown and must not be assumed. Output:\n{out[:500]}"
+        )
+    return int(m.group(1)), int(m.group(2))
 
 
 # -------------------------------------------------------------------- server
