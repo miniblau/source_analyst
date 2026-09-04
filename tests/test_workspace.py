@@ -141,3 +141,56 @@ class TestServerAuth(unittest.TestCase):
             server._post(1234, "1", timeout=1, secret="s3cret")
             token = base64.b64encode(b"source_analyst:s3cret").decode()
             self.assertEqual(seen["headers"]["Authorization"], f"Basic {token}")
+
+
+class TestReapOthers(unittest.TestCase):
+    """One CPG server at a time (see server.reap_others). No Joern, no LLM.
+
+    The leak this guards was silent: fifteen servers holding 13.1GB made every
+    agent call ~17x slower without failing a single query, so the only way it
+    can be caught is a test that counts what is left running.
+    """
+
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(self.tmp.cleanup)
+        self.var = Path(self.tmp.name)
+        (self.var / "cpg").mkdir()
+        os.environ["SOURCE_ANALYST_VAR"] = str(self.var)
+        self.addCleanup(os.environ.pop, "SOURCE_ANALYST_VAR", None)
+
+    def _ws(self, h: str) -> "workspace.Workspace":
+        root = self.var / "cpg" / h
+        root.mkdir(exist_ok=True)
+        (root / "server.pid").write_text("1\n")
+        (root / "server.port").write_text("1234\n")
+        return workspace.Workspace(src=Path(h), source_hash=h, root=root)
+
+    def test_reaps_every_other_workspace_but_not_its_own(self):
+        from source_analyst.cpg import server
+
+        mine = self._ws("aaaa")
+        for h in ("bbbb", "cccc", "dddd"):
+            self._ws(h)
+        with unittest.mock.patch.object(server, "stop", return_value=True) as stopped:
+            reaped = server.reap_others(mine)
+        self.assertEqual(sorted(reaped), ["bbbb", "cccc", "dddd"])
+        self.assertNotIn("aaaa", reaped)
+        self.assertEqual(stopped.call_count, 3)
+
+    def test_reaps_nothing_when_it_is_the_only_workspace(self):
+        from source_analyst.cpg import server
+
+        mine = self._ws("aaaa")
+        with unittest.mock.patch.object(server, "stop", return_value=True) as stopped:
+            self.assertEqual(server.reap_others(mine), [])
+        self.assertEqual(stopped.call_count, 0)
+
+    def test_a_workspace_with_no_pid_file_is_not_a_running_server(self):
+        from source_analyst.cpg import server
+
+        mine = self._ws("aaaa")
+        idle = self.var / "cpg" / "eeee"
+        idle.mkdir()  # built but never served
+        with unittest.mock.patch.object(server, "stop", return_value=True):
+            self.assertEqual(server.reap_others(mine), [])

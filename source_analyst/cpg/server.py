@@ -22,7 +22,7 @@ import urllib.error
 import urllib.request
 from pathlib import Path
 
-from .workspace import Workspace, private_dir, private_file
+from .workspace import Workspace, private_dir, private_file, var_root
 
 JOERN = os.environ.get("JOERN_BIN", "joern")
 JOERN_PARSE = os.environ.get("JOERN_PARSE_BIN", "joern-parse")
@@ -190,6 +190,39 @@ def _post(port: int, code: str, timeout: int, secret: str | None = None) -> dict
         return json.loads(resp.read().decode())
 
 
+def reap_others(ws: Workspace) -> list[str]:
+    """Stop every OTHER workspace's server. Returns the hashes stopped.
+
+    The cache is keyed on a source hash, so every rebuild — a corpus edit, a new
+    target, a fixture tweak — mints a new workspace and leaves the previous
+    server running with its whole CPG resident. Nothing ever reaped them.
+
+    Measured 2026-09-04: fifteen live servers had accumulated over fifteen days
+    holding 13.1GB. On this 30GB box that left the 20.2GB model unable to stay
+    resident, paging experts out of swap on every token — generation fell from a
+    benchmarked 11.65 t/s to 0.68, a 17x tax on every agent call. It was
+    invisible in the logs because nothing failed: each query still answered and
+    each call still returned, only ~17x slower, which reads as "the model is
+    slow" rather than "the substrate is holding the model's memory".
+
+    So: one CPG server at a time. A warm server is worth keeping (design §10.5)
+    precisely because loading is expensive; a warm server for a tree nobody is
+    analysing is worth nothing and costs the model its residency. The model host
+    is held to the same one-at-a-time rule for the same reason, in the place that
+    is allowed to know about model hosts: config/runners.yaml.
+    """
+    stopped = []
+    for d in running_workspaces(var_root() / "cpg"):
+        if d.name == ws.source_hash:
+            continue
+        other = Workspace(src=Path(d.name), source_hash=d.name, root=d)
+        if stop(other):
+            stopped.append(d.name)
+    if stopped:
+        log(f"reaped {len(stopped)} idle server(s) to free memory: {', '.join(stopped)}")
+    return stopped
+
+
 def ensure_server(ws: Workspace, timeout: int = START_TIMEOUT) -> int:
     """Return the port of a live server for this workspace, starting one if needed."""
     if is_running(ws):
@@ -198,6 +231,9 @@ def ensure_server(ws: Workspace, timeout: int = START_TIMEOUT) -> int:
         return port
     if not ws.is_built():
         raise SystemExit(f"cpg: no CPG for {ws.src} — run `cpg build --src {ws.src}` first")
+
+    # Before paying for a JVM + CPG load, give back the memory the last one holds.
+    reap_others(ws)
 
     ws.pid_file.unlink(missing_ok=True)
     ws.port_file.unlink(missing_ok=True)

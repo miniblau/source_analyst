@@ -39,8 +39,36 @@
 # Batch sizes default to what fits the measured slot context, not to what is fast.
 # See the note in README; a briefing that overruns the slot dies mid-record and the
 # leg is lost, which is the single most expensive thing that can happen overnight.
+#
+# AND BATCHING IS NOT A SPEED LEVER — measured on the 2026-08-31 run, so do not
+# reach for it again. Median seconds PER CASE, by agent and batch size:
+#
+#   hypothesize   1 case 130s | 2 cases 109s | 3 cases 201s | 4 cases 139s
+#   report        1 case 312s | 2 cases 305s
+#
+# Flat. Generation dominates on a local model and generation is per-case work, so
+# a bigger batch moves the same tokens in fewer HTTP requests and saves nothing.
+# The shared prompt that batching amortises is the small half of the cost.
+#
+# What a bigger batch does change is the downside: one refusal now costs N cases
+# instead of 1, and the briefing grows faster than the case count. Tried on trace
+# at 4 (2026-09-04): the briefing was 53,892 bytes / ~23.4k tokens against a 32k
+# slot, the call blew the 1800s timeout, and four cases were dropped having
+# admitted nothing. Trace stays at 1.
 
 set -uo pipefail   # deliberately NOT -e: a failing leg must not kill the queue
+
+# The run's Joern server must not outlive the run. The CPG cache is keyed on a
+# source hash, so each new tree mints a new workspace and its own server, and
+# nothing used to stop them: measured 2026-09-04, fifteen had accumulated over
+# fifteen days holding 13.1GB. A FRESH server for WebGoat is 599MB — the 7.4GB
+# the oldest had reached is JVM heap growth over days of queries, not the cost of
+# the CPG. Either way the model loses its residency and generation drops ~17x,
+# and nothing fails while it happens.
+#
+# `ensure_server` now reaps other workspaces on the way up; this trap closes the
+# other half, so an overnight run leaves the box as it found it.
+trap 'cpg stop --all >/dev/null 2>&1 || true' EXIT
 
 src="${1:?source tree, e.g. corpus/webgoat}"; shift
 lang="${NIGHT_LANG:-java}"
