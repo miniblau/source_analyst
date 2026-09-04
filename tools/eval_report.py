@@ -32,20 +32,56 @@ def load(out: Path):
             scores[(cls, lang)].append(json.loads(f.read_text()))
         except ValueError:
             continue
+    runs_per_set: dict[tuple[str, str], set] = defaultdict(set)
     for f in sorted(out.glob("run*.jsonl")):
         parts = f.name.split(".")
         if len(parts) < 3:
             continue
         run, cls, lang = parts[0], parts[1], parts[2]
+        runs_per_set[(cls, lang)].add(run)
+        facts, hyps = {}, []
         for line in f.read_text().splitlines():
             if not line.strip():
                 continue
             r = json.loads(line)
-            if r.get("type") != "hypothesis" or r.get("src") != "agent:hypothesize":
-                continue
-            site = r.get("case") or "?"
+            if r.get("type") == "fact":
+                facts[r["id"]] = r
+            elif r.get("type") == "hypothesis" and r.get("src") == "agent:hypothesize":
+                hyps.append(r)
+        for r in hyps:
+            site = site_of(r, facts)
             verdicts[(cls, lang, site)].append(f"{r.get('status')}@{r.get('confidence')}")
-    return scores, verdicts
+    return scores, verdicts, runs_per_set
+
+
+def site_of(hyp: dict, facts: dict) -> str:
+    """The site a hypothesis is ABOUT, resolved from its evidence facts.
+
+    Not `hyp["case"]`, which is prose the agent wrote about itself. Keying on that
+    string cost this report its whole point: measured 2026-09-04, the agent called
+    one WebGoat site `JWTToken.java:98` in run 1 and `JWTController.java:...` in
+    runs 2 and 3. Keyed on the prose those are two cases, each seen with one
+    verdict, so both counted STABLE — and the genuine flip behind them
+    (refuted@0.9 -> inconclusive@0.5, which is exactly what moved open_redirect
+    precision from 1.0 to 0.5) was reported nowhere. A harness that exists to
+    measure noise was under-reporting it.
+
+    `score` has always resolved sites this way and says why in its own docstring.
+    Evidence ids are content hashes over facts built once and shared by every run,
+    so this key is stable by construction.
+    """
+    for fid in hyp.get("evidence", []):
+        f = facts.get(fid)
+        if not f:
+            continue
+        file, line = f.get("sink_file"), f.get("sink_line")
+        if file is None:
+            file, line = f.get("file"), f.get("line")
+        if file is not None and line is not None:
+            return f"{file}:{line}"
+    # No resolvable evidence is not "one anonymous case": collapsing them would
+    # merge unrelated hypotheses into a single fake-stable key.
+    return f"<unresolved:{hyp.get('id')}>"
 
 
 def band(vals: list) -> str:
@@ -58,8 +94,11 @@ def band(vals: list) -> str:
 
 
 def main() -> int:
-    out = Path(sys.argv[1])
-    scores, verdicts = load(out)
+    return report(Path(sys.argv[1]))
+
+
+def report(out: Path) -> int:
+    scores, verdicts, runs_per_set = load(out)
     if not scores:
         # An eval that scored nothing is not an eval that found nothing wrong.
         print(f"eval_report: no scorecards under {out} — every run failed, or the "
@@ -87,13 +126,21 @@ def main() -> int:
     for (cls, lang, site), vs in sorted(verdicts.items()):
         uniq = sorted(set(vs))
         short = site.split("/")[-1]
-        if len(uniq) == 1:
+        n_runs = len(runs_per_set.get((cls, lang), ()))
+        # A case the agent judged in some runs and not others is as damaging to a
+        # measurement as one that changed its mind, and it is NOT stable — it was
+        # simply absent. Counting it stable on the strength of the runs where it
+        # did appear is how a disappearing case hides inside a clean band.
+        missing = n_runs - len(vs)
+        if len(uniq) == 1 and missing <= 0:
             stable += 1
         else:
             flipped += 1
             print(f"  FLIPPED  {cls}/{lang} {short}")
             for u in uniq:
                 print(f"             {vs.count(u)}x {u}")
+            if missing > 0:
+                print(f"             {missing}x ABSENT — not judged in that run")
     print(f"\n  {stable} stable, {flipped} flipped across runs.")
     if flipped:
         print("  Any metric movement smaller than these flips is noise, not a result.")
