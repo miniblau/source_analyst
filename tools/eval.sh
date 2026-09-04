@@ -65,6 +65,14 @@ except Exception: pass'); do
 done
 
 # ---- N independent judgement runs off the same facts -----------------------
+# A runner that is misconfigured fails identically every time, so grinding through
+# every run to discover that wastes the window and buries the cause under N copies
+# of the same line. Measured the hard way: LLM_MODEL unset against a llama-server
+# in router mode gives `model 'local' not found`, and nine runs failed in under a
+# second each. A per-run flake must still be tolerated — that is what the band is
+# for — so the abort is specific: if EVERY target of run 1 failed, this is setup,
+# not variance.
+failed_run1=0
 for i in $(seq 1 "$runs"); do
   for spec in "${targets[@]}"; do
     IFS=: read -r c l src target <<< "$spec"
@@ -82,8 +90,16 @@ for i in $(seq 1 "$runs"); do
         > "$out/run$i.$c.$l.score.json" 2>/dev/null || true
     else
       echo "eval: run $i $c/$l FAILED — recorded, not retried" >&2
+      [ "$i" -eq 1 ] && failed_run1=$((failed_run1 + 1))
     fi
   done
+  if [ "$i" -eq 1 ] && [ "$failed_run1" -eq "${#targets[@]}" ]; then
+    echo "eval: every target of run 1 failed — this is a setup problem, not model" \
+         "variance, and repeating it $runs times would only hide the cause." \
+         "See $out/run1.err" >&2
+    python3 tools/eval_report.py "$out"
+    exit 2
+  fi
 done
 
 python3 tools/eval_report.py "$out"

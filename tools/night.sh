@@ -51,10 +51,20 @@
 # The shared prompt that batching amortises is the small half of the cost.
 #
 # What a bigger batch does change is the downside: one refusal now costs N cases
-# instead of 1, and the briefing grows faster than the case count. Tried on trace
-# at 4 (2026-09-04): the briefing was 53,892 bytes / ~23.4k tokens against a 32k
-# slot, the call blew the 1800s timeout, and four cases were dropped having
-# admitted nothing. Trace stays at 1.
+# instead of 1. Tried on trace at 4 (2026-09-04): the call blew the 1800s timeout
+# and four cases were dropped having admitted nothing.
+#
+# And note WHY it blew it, because the obvious answer is wrong. The briefing was
+# 53,892 bytes = ~14.1k tokens (measured on the tokenizer, see below) against a
+# 32k slot, so it fitted with room to spare. It ran out of TIME, generating four
+# full revisions at ~5 t/s. Context was never the constraint; output was. Trace
+# stays at 1.
+#
+# Tokenizer ratio, measured 2026-09-04 across five real briefings (hypothesize and
+# trace, Java and TS): 3.77-3.90 chars per token, call it 3.8. An earlier note here
+# said 2.3, which was INFERRED from a briefing that died on a 16384 context rather
+# than measured, and over-counts by ~1.65x. Use `brief`'s `bytes` over 3.8, and
+# remember the slot has to hold the output too.
 
 set -uo pipefail   # deliberately NOT -e: a failing leg must not kill the queue
 
